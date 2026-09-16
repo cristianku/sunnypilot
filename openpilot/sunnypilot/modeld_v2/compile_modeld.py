@@ -12,7 +12,7 @@ import os
 import tempfile
 import time
 from functools import partial
-from openpilot.selfdrive.modeld.helpers import dump_oob, load_oob
+from openpilot.sunnypilot.modeld_v2.helpers import dump_oob, load_oob
 import numpy as np
 os.environ['GMMU'] = '0'
 
@@ -32,7 +32,7 @@ def _patch_tinygrad_fetch_fw():
   helpers.fetch_fw = fetch_fw
 _patch_tinygrad_fetch_fw()
 
-import openpilot.selfdrive.modeld.compile_modeld as stock
+import openpilot.sunnypilot.modeld_v2.stock_dependencies as stock
 from tinygrad import dtypes
 from tinygrad.device import Device
 from tinygrad.engine.jit import TinyJit
@@ -123,7 +123,10 @@ def generate_queues_and_npy(input_shapes: dict, frame_skip: int, device: str = D
     queues['feat_q'] = Tensor(np.zeros((feat_q_len, features_buffer[0], feat_dim),
                        dtype=np.float32), device=device).contiguous().realize()
 
-  queues.update({key: Tensor(value, device='NPY').realize() for key, value in npy_arrays.items() if key in ('tfm', 'big_tfm')})
+  for key in ('tfm', 'big_tfm'):
+    if key in npy_arrays:
+      npy_arrays[key] = np.eye(3, dtype=np.float32)
+      queues[key] = Tensor(npy_arrays[key], device='NPY').realize()
 
   return queues, npy_arrays
 

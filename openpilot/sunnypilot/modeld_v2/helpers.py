@@ -55,6 +55,11 @@ def _dynamic_factory(real_class):
     return _enum_factory(real_class)
 
   def factory(*args, **kwargs):
+    if real_class.__name__ == 'Buffer':
+      # Tinygrad, before compile_modeld moved to tg, serialized lb_refcount at index 6. It has been removed.
+      if len(args) >= 7 and isinstance(args[6], int):
+        args = tuple(list(args[:6]) + list(args[7:]))
+
     try:
       return real_class(*args, **kwargs)
     except TypeError:
@@ -98,3 +103,77 @@ def load_oob(f):
       f.readinto(pb)
       yield pb
   return DynamicTinygradUnpickler(io.BytesIO(opcodes), buffers=buffers()).load()
+
+
+def dump_oob(obj, f):
+  buffers = []
+  def buffer_cb(buffer):
+    buffers.append(buffer)
+    return False
+
+  opcodes = pickle.dumps(obj, protocol=5, buffer_callback=buffer_cb)
+  f.write(struct.pack('<q', len(opcodes)))
+  f.write(opcodes)
+  for b in buffers:
+    f.write(struct.pack('<q', len(b.raw())))
+    f.write(b.raw())
+
+
+def patch_tinygrad_engine():
+  from tinygrad.uop.ops import Ops
+  from tinygrad.engine import realize
+  if not getattr(realize, '_legacy_resolve_patched', False):
+    old_resolve = realize._resolve
+    def patched_resolve(b, inputs):
+      if b.op == Ops.CUSTOM and isinstance(b.arg, int):
+        return inputs[b.arg]
+      return old_resolve(b, inputs)
+    realize._resolve = patched_resolve
+
+    import tinygrad.uop.ops as uop_ops
+    old_dtype_from_uop = uop_ops.dtype_from_uop
+    def patched_dtype_from_uop(op, src, arg):
+      if op == Ops.CUSTOM and isinstance(arg, int):
+        from tinygrad.dtype import dtypes
+        return dtypes.void
+      return old_dtype_from_uop(op, src, arg)
+    uop_ops.dtype_from_uop = patched_dtype_from_uop
+
+    old_get_runtime = realize.get_runtime
+
+    def exec_legacy(ctx, call, ast):
+      if getattr(call.arg, 'aux', None) != "LEGACY_EXEC":
+        return None
+      from tinygrad.engine.realize import resolve_params, unwrap_multi
+      resolved = resolve_params(call, ctx.input_uops)
+      device = call.src[1].device if len(call.src) > 1 else 'NPY'
+      if isinstance(device, tuple):
+        device = device[0]
+
+      ets = []
+      prg = old_get_runtime(device, ast)
+      for _, (bufs, _device_vars) in zip([device], unwrap_multi(call, resolved), strict=False):
+        real_bufs = [b.ensure_allocated() for b in bufs]
+        try:
+          et = prg(real_bufs, ctx.var_vals, wait=ctx.wait)
+        except Exception:
+          from tinygrad.shape.symbolic import sym_infer
+          g = tuple(sym_infer(x, ctx.var_vals) if not isinstance(x, int) else x for x in ast.arg.global_size)\
+            if hasattr(ast.arg, 'global_size') and ast.arg.global_size else None
+          l = tuple(sym_infer(x, ctx.var_vals) if not isinstance(x, int) else x for x in ast.arg.local_size)\
+            if hasattr(ast.arg, 'local_size') and ast.arg.local_size else None
+          vals = tuple(ctx.var_vals[v.expr] for v in getattr(ast.arg, 'vars', []))
+          et = prg.clprg(*[b._buf for b in real_bufs], global_size=g, local_size=l, vals=vals, wait=ctx.wait)\
+            if hasattr(prg, 'clprg') else prg(*[b._buf for b in real_bufs], global_size=g, local_size=l, vals=vals, wait=ctx.wait)
+        ets.append(et)
+      return ets
+
+    from tinygrad.uop.ops import UPat
+    realize.pm_exec.patterns.insert(0, (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_legacy))
+    old_track_stats = realize.track_stats
+    def patched_track_stats(ctx, call, st, ets):
+      if ets is None:
+        return
+      return old_track_stats(ctx, call, st, ets)
+    realize.track_stats = patched_track_stats
+    realize._legacy_resolve_patched = True
