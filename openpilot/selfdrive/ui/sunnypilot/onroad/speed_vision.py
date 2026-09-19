@@ -29,10 +29,6 @@ class VisionSpeedLimitRenderer(Widget):
 
   def update(self) -> None:
     sm = ui_state.sm
-    if "speedVisionState" not in sm.data:
-      self.visible = False
-      return
-
     self.visible = bool(sm.seen["speedVisionState"])
     if not self.visible:
       return
