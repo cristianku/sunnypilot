@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[5]
+REPO = Path(__file__).resolve().parents[4]
 
 
 def test_vision_widget_is_separate_from_operational_sla_renderer() -> None:

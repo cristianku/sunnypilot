@@ -7,7 +7,7 @@ import pytest
 from openpilot.sunnypilot.speed_vision import publisher
 from openpilot.sunnypilot.speed_vision._vendor.speed_vision_core import types
 
-REPO = Path(__file__).resolve().parents[5]
+REPO = Path(__file__).resolve().parents[4]
 
 
 def _frame() -> types.FrameRef:

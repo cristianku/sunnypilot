@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[5]
+REPO = Path(__file__).resolve().parents[4]
 SPEED_VISION = REPO / "openpilot/sunnypilot/speed_vision"
 
 
@@ -35,6 +35,7 @@ def test_speed_vision_production_code_has_no_vehicle_control_surface() -> None:
     p for p in SPEED_VISION.rglob("*.py")
     if "tests" not in p.parts and "_vendor" not in p.parts
   ]
+  assert production
   for path in production:
     text = path.read_text(encoding="utf-8")
     for token in forbidden:

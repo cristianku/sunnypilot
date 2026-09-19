@@ -4,7 +4,7 @@ from pathlib import Path
 
 from openpilot.sunnypilot.speed_vision import publisher
 
-REPO = Path(__file__).resolve().parents[5]
+REPO = Path(__file__).resolve().parents[4]
 
 
 def test_unavailable_state_carries_no_speed_value() -> None:
