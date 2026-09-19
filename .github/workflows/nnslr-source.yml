@@ -1,0 +1,28 @@
+name: nnslr-source
+
+on:
+  push:
+    branches:
+      - nn-speed-limit-vision
+  pull_request:
+    paths:
+      - "openpilot/sunnypilot/speed_vision/**"
+      - "openpilot/cereal/custom.capnp"
+      - "openpilot/cereal/log.capnp"
+      - "openpilot/cereal/services.py"
+      - "openpilot/common/params_keys.h"
+      - "openpilot/system/manager/process_config.py"
+      - ".github/workflows/nnslr-source.yml"
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - run: pytest -q openpilot/sunnypilot/speed_vision/tests
