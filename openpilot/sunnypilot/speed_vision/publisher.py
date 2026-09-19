@@ -174,6 +174,73 @@ def build_speed_vision_state(
   }
 
 
+
+def build_unavailable_state(
+  *,
+  session_id: str,
+  producer_epoch: int,
+  sequence: int,
+  backend: str,
+  reason: str,
+  processed_mono_ns: int,
+) -> dict[str, Any]:
+  """Build a health-only state that can never be interpreted as a limit."""
+  if not session_id:
+    raise SpeedVisionWireError("session_id must be non-empty")
+  if any(isinstance(v, bool) or not isinstance(v, int) or v < 0
+         for v in (producer_epoch, sequence, processed_mono_ns)):
+    raise SpeedVisionWireError("epoch, sequence and processed time must be non-negative integers")
+  return {
+    "schemaVersion": 1,
+    "producerEpoch": producer_epoch,
+    "sequence": sequence,
+    "modelHash": "",
+    "configHash": "",
+    "rulepackHash": "",
+    "processedMonoNs": processed_mono_ns,
+    "frame": {
+      "sessionId": session_id,
+      "stream": "unknown",
+      "frameId": 0,
+      "timestampSof": 0,
+      "timestampEof": 0,
+      "nativeWidth": 0,
+      "nativeHeight": 0,
+      "preprocessingIdentity": "none",
+      "captureReference": "unknown",
+    },
+    "health": {
+      "backend": backend,
+      "available": False,
+      "status": "unavailable",
+      "hasLastProcessedCapture": False,
+      "lastProcessedCaptureMonoNs": 0,
+      "hasLastSuccessfulCompletion": False,
+      "lastSuccessfulCompletionMonoNs": 0,
+      "overflow": False,
+      "faultCode": reason,
+      "droppedFrames": 0,
+    },
+    "observations": [],
+    "hypothesis": {
+      "state": "unavailable",
+      "hasValue": False,
+      "valueKph": 0,
+      "usableForAdvisory": False,
+      "trackId": "",
+      "eventId": "",
+      "hasActivationStart": False,
+      "activationStartMonoNs": 0,
+      "hasActivationEnd": False,
+      "activationEndMonoNs": 0,
+      "hasLastContext": False,
+      "lastContextMonoNs": 0,
+      "unavailableReason": reason,
+    },
+    "hasLastObservationMonoNs": False,
+    "lastObservationMonoNs": 0,
+  }
+
 def fill_cereal_state(builder: Any, payload: dict[str, Any]) -> None:
   """Assign a validated payload to a generated SpeedVisionState builder."""
   for key in ("schemaVersion", "producerEpoch", "sequence", "modelHash", "configHash",
