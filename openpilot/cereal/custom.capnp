@@ -470,7 +470,122 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
-struct CustomReserved10 @0xcb9fd56c7057593a {
+struct SpeedVisionState @0xcb9fd56c7057593a {
+  schemaVersion @0 :UInt16;
+  producerEpoch @1 :UInt64;
+  sequence @2 :UInt64;
+  modelHash @3 :Text;
+  configHash @4 :Text;
+  rulepackHash @5 :Text;
+  processedMonoNs @6 :UInt64;
+  frame @7 :Frame;
+  health @8 :BackendHealth;
+  observations @9 :List(Observation);
+  hypothesis @10 :Hypothesis;
+  hasLastObservationMonoNs @11 :Bool;
+  lastObservationMonoNs @12 :UInt64;
+
+  struct Frame {
+    sessionId @0 :Text;
+    stream @1 :Stream;
+    frameId @2 :UInt32;
+    timestampSof @3 :UInt64;
+    timestampEof @4 :UInt64;
+    nativeWidth @5 :UInt16;
+    nativeHeight @6 :UInt16;
+    preprocessingIdentity @7 :Text;
+    captureReference @8 :CaptureReference;
+  }
+
+  struct BBox {
+    x1 @0 :Float32;
+    y1 @1 :Float32;
+    x2 @2 :Float32;
+    y2 @3 :Float32;
+  }
+
+  struct Observation {
+    observationId @0 :Text;
+    frameId @1 :UInt32;
+    bbox @2 :BBox;
+    signFamily @3 :SignFamily;
+    valueState @4 :ValueState;
+    hasValue @5 :Bool;
+    valueKph @6 :UInt16;
+    detectionScore @7 :Float32;
+    classificationScore @8 :Float32;
+    supportedDomain @9 :Bool;
+  }
+
+  struct BackendHealth {
+    backend @0 :Text;
+    available @1 :Bool;
+    status @2 :Text;
+    hasLastProcessedCapture @3 :Bool;
+    lastProcessedCaptureMonoNs @4 :UInt64;
+    hasLastSuccessfulCompletion @5 :Bool;
+    lastSuccessfulCompletionMonoNs @6 :UInt64;
+    overflow @7 :Bool;
+    faultCode @8 :Text;
+    droppedFrames @9 :UInt32;
+  }
+
+  struct Hypothesis {
+    state @0 :HypothesisState;
+    hasValue @1 :Bool;
+    valueKph @2 :UInt16;
+    usableForAdvisory @3 :Bool;
+    trackId @4 :Text;
+    eventId @5 :Text;
+    hasActivationStart @6 :Bool;
+    activationStartMonoNs @7 :UInt64;
+    hasActivationEnd @8 :Bool;
+    activationEndMonoNs @9 :UInt64;
+    hasLastContext @10 :Bool;
+    lastContextMonoNs @11 :UInt64;
+    unavailableReason @12 :Text;
+  }
+
+  enum Stream {
+    unknown @0;
+    narrowRoad @1;
+    wideRoad @2;
+    cabin @3;
+    synthetic @4;
+  }
+
+  enum CaptureReference {
+    unknown @0;
+    sof @1;
+    eof @2;
+  }
+
+  enum SignFamily {
+    maxSpeed @0;
+    cancellation @1;
+    zone @2;
+    variableDisplay @3;
+    otherSign @4;
+    notASign @5;
+    unreadable @6;
+  }
+
+  enum ValueState {
+    value @0;
+    unknown @1;
+    unreadable @2;
+    notApplicable @3;
+    unavailable @4;
+  }
+
+  enum HypothesisState {
+    none @0;
+    observed @1;
+    ahead @2;
+    current @3;
+    uncertain @4;
+    unavailable @5;
+  }
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
