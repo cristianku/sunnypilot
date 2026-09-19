@@ -65,6 +65,14 @@ def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
+def speed_vision(started: bool, params: Params, CP: car.CarParams) -> bool:
+  """Run NNSLR only onroad and only when explicitly enabled."""
+  try:
+    mode = int(params.get("VisionSpeedLimitMode", return_default=True))
+  except (TypeError, ValueError):
+    mode = 0
+  return started and mode != 0
+
 def livestream(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("IsLiveStreaming")
 
@@ -169,6 +177,7 @@ procs = [
 procs += [
   # Models
   PythonProcess("models_manager", "openpilot.sunnypilot.models.manager", only_offroad),
+  PythonProcess("speedvisiond", "openpilot.sunnypilot.speed_vision.speedvisiond", speed_vision),
   NativeProcess("modeld_tinygrad", "openpilot/sunnypilot/modeld_v2", ["./modeld"], and_(only_onroad, is_tinygrad_model)),
 
   # Backup
