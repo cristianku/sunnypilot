@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "source_repository": "cristianku/openpilot-nnslr-tools",
+  "source_commit": "1a212ee72aa8ba7fff89559091095c2274e19887",
+  "tree_digest": "0d34f36a2e409bc387c4a9e93c0d9a12e8d040499ab58352247fd234347419d9",
+  "files": [
+    "__init__.py",
+    "py.typed",
+    "types.py"
+  ],
+  "file_sha256": {
+    "__init__.py": "61519237a4b110d9ff7a7f0cf7d0272a27159f32097cddf0791da4ae83cd49ee",
+    "py.typed": "d0216d067840cf1cd1ad2fc500a645e545a60a86bba224712f4f86bc79e173d8",
+    "types.py": "2f18403e84c87f53a356d86b781c0620190e21be0f768685682bd90e572bcebf"
+  }
+}
