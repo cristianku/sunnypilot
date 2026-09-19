@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "feature_id": "nnslr-speed-vision",
+  "state": "bootstrap",
+  "core": {
+    "source_repository": "cristianku/openpilot-nnslr-tools",
+    "source_commit": "1a212ee72aa8ba7fff89559091095c2274e19887",
+    "tree_digest": "0d34f36a2e409bc387c4a9e93c0d9a12e8d040499ab58352247fd234347419d9",
+    "manifest": "_vendor/speed_vision_core.snapshot.json"
+  },
+  "model": {
+    "state": "unavailable",
+    "bundle_digest": null
+  },
+  "rulepack": {
+    "state": "unavailable",
+    "digest": null
+  },
+  "capability_profile": "core-contract-only"
+}
