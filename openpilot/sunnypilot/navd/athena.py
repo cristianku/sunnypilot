@@ -34,11 +34,14 @@ def setNavRoute(latitude: float, longitude: float, waypoints: list | None = None
 
 @dispatcher.add_method
 def setMapboxToken(token: str) -> dict[str, int | str]:
-  """Stores a Mapbox public token (pk.); an empty string removes it, and navd goes back to comma's proxy."""
+  """Stores a Mapbox public token (pk.); an empty string removes it, and navd goes back to comma's proxy.
+  The phone sends it with every destination, so an unchanged token is not written again."""
+  params = Params()
   if token == "":
-    Params().remove(MAPBOX_TOKEN_PARAM)
+    params.remove(MAPBOX_TOKEN_PARAM)
     return {"success": 1}
   if not valid_mapbox_token(token):
     return {"success": 0, "error": "Invalid Mapbox token: a public token starts with pk."}
-  Params().put(MAPBOX_TOKEN_PARAM, token, block=True)
+  if params.get(MAPBOX_TOKEN_PARAM) != token:
+    params.put(MAPBOX_TOKEN_PARAM, token, block=True)
   return {"success": 1}

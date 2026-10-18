@@ -81,6 +81,13 @@ class TestSetMapboxToken(OpenpilotTestCase):
     assert dispatcher["setMapboxToken"]("") == {"success": 1}
     assert Params().get(MAPBOX_TOKEN_PARAM) is None
 
+  def test_same_token_is_not_written_again(self):
+    from openpilot.system.athena.rpc import dispatcher
+    assert dispatcher["setMapboxToken"](TOKEN) == {"success": 1}
+    with patch.object(Params, "put") as put:
+      assert dispatcher["setMapboxToken"](TOKEN) == {"success": 1}
+    put.assert_not_called()
+
   def test_rejects_secret_and_malformed_tokens(self):
     from openpilot.system.athena.rpc import dispatcher
     Params().put(MAPBOX_TOKEN_PARAM, TOKEN)
