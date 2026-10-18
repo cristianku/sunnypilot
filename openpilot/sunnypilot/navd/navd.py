@@ -13,6 +13,9 @@ With waypoints:
 - the steps of every leg are followed in order, without the "arrive" step that ends each intermediate leg
 - a waypoint closer than PASSED_DISTANCE is passed: it and those before it are dropped, also from the param,
   so neither a reroute nor a restarted navd leads back to it
+
+With a Mapbox token sent from the phone (MapboxToken param, see mapbox.py) every route request goes straight to
+Mapbox with it; without one navd keeps upstream's choice: the MAPBOX_TOKEN variable, else comma's proxy.
 """
 import numpy as np
 import requests
@@ -22,6 +25,7 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.navigation.navd import RECOMPUTE_HOLD, RouteEngine
 from openpilot.selfdrive.navigation.route import local_meters
+from openpilot.sunnypilot.navd.mapbox import MAPBOX_HOST, MAPBOX_TOKEN_PARAM
 from openpilot.sunnypilot.navd.waypoints import DESTINATION_PARAM, param_with_waypoints, waypoints_from_param
 
 PASSED_DISTANCE = 50  # meters; at 130 km/h and 1 Hz the ego is sampled every 36 m
@@ -43,6 +47,19 @@ class RouteEngineSP(RouteEngine):
   def __init__(self, sm, pm, params=None):
     super().__init__(sm, pm, params)
     self.nav_waypoints = ()  # the waypoints of the current route, (longitude, latitude, via)
+    # upstream's choice, used while no token is saved from the phone
+    self.upstream_mapbox_token = self.mapbox_token
+    self.upstream_mapbox_host = self.mapbox_host
+
+  def select_mapbox_token(self):
+    """Before each route request: the token saved from the phone, which can change while navd runs."""
+    saved_token = self.params.get(MAPBOX_TOKEN_PARAM)
+    if saved_token:
+      self.mapbox_token = saved_token
+      self.mapbox_host = MAPBOX_HOST
+    else:
+      self.mapbox_token = self.upstream_mapbox_token
+      self.mapbox_host = self.upstream_mapbox_host
 
   def recompute_route(self, gps_ok: bool):
     if self.last_position is None:
@@ -90,6 +107,7 @@ class RouteEngineSP(RouteEngine):
     return remaining
 
   def calculate_route(self, destination, waypoints=()):
+    self.select_mapbox_token()
     if not waypoints:
       self.nav_waypoints = ()
       super().calculate_route(destination)
