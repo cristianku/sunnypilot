@@ -289,6 +289,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       none @0;
       car @1;
       map @2;
+      vision @3;
     }
 
     enum AssistState {
@@ -476,7 +477,11 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
-struct CustomReserved10 @0xcb9fd56c7057593a {
+# The speed limit read by the speed-limits neural network from the road camera (speedvisiond): the limit it remembers
+# from the signs it read, or 0 when it is not sure, so the resolver takes the map instead (as with carStateSP).
+struct SpeedVisionSP @0xcb9fd56c7057593a {
+  speedLimit @0 :Float32;  # m/s, 0 when not sure
+  modelName @1 :Text;
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

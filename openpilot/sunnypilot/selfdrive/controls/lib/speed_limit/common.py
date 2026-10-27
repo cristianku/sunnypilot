@@ -16,6 +16,14 @@ class Policy(IntEnumBase):
   combined = 4
 
 
+class SignReader(IntEnumBase):
+  """Who reads the signs for the "Car" of the policy: the car, the speed-limits neural network, or the car and the
+  network when the car has no limit."""
+  car = 0
+  vision = 1
+  car_then_vision = 2
+
+
 class OffsetType(IntEnumBase):
   off = 0
   fixed = 1

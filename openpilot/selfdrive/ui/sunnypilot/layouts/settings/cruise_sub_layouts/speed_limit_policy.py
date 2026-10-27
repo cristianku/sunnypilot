@@ -25,6 +25,15 @@ SPEED_LIMIT_POLICY_DESCRIPTIONS = [
   tr("Combined: Use combined Speed Limit data from Car & OpenStreetMaps")
 ]
 
+# Who reads the signs for "Car" above: the car, the speed-limits neural network on the road camera, or both.
+SIGN_READER_BUTTONS = [tr("Car"), tr("Network"), tr("Car, then Network")]
+
+SIGN_READER_DESCRIPTIONS = [
+  tr("Car: Use Speed Limit signs read by the Car"),
+  tr("Network: Use Speed Limit signs read by the neural network from the road camera"),
+  tr("Car, then Network: Use Speed Limit signs read by the Car if available, else by the neural network"),
+]
+
 
 class SpeedLimitPolicyLayout(Widget):
   def __init__(self, back_btn_callback: Callable):
@@ -43,15 +52,27 @@ class SpeedLimitPolicyLayout(Widget):
       param="SpeedLimitPolicy",
       button_width=250,
     )
+    self._sign_reader = multiple_button_item_sp(
+      title=lambda: tr("Signs Read By"),
+      description=self._get_sign_reader_description,
+      buttons=SIGN_READER_BUTTONS,
+      param="SpeedLimitSignReader",
+      button_width=350,
+    )
 
     items = [
-      self._speed_limit_policy
+      self._speed_limit_policy,
+      self._sign_reader,
     ]
     return items
 
   @staticmethod
   def _get_policy_description():
     return get_highlighted_description(ui_state.params, "SpeedLimitPolicy", SPEED_LIMIT_POLICY_DESCRIPTIONS)
+
+  @staticmethod
+  def _get_sign_reader_description():
+    return get_highlighted_description(ui_state.params, "SpeedLimitSignReader", SIGN_READER_DESCRIPTIONS)
 
   def _render(self, rect):
     self._back_button.set_position(self._rect.x, self._rect.y + 20)
@@ -63,3 +84,4 @@ class SpeedLimitPolicyLayout(Widget):
   def show_event(self):
     self._scroller.show_event()
     self._speed_limit_policy.show_description(True)
+    self._sign_reader.show_description(True)
