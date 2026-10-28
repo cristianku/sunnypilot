@@ -25,8 +25,8 @@ DARK_GREY = rl.Color(40, 40, 40, 230)
 
 class VisionSpeedLimit(Widget):
   """The speed limit read by the speed-limits neural network (speedVisionSP), drawn in the top right corner when
-  Show Vision Speed Limit is on. Information only: it does not change the speed. A grey ring with a dash means no
-  reading: the network is not sure, or speedvisiond is not running."""
+  Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision. The drawing does not change the speed. A
+  grey ring with a dash means no reading: the network is not sure, or speedvisiond is not running."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
