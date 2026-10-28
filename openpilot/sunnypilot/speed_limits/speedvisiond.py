@@ -15,6 +15,7 @@ os.environ['GMMU'] = '0'
 import time
 from typing import NoReturn
 
+import numpy as np
 from msgq.visionipc import VisionIpcClient
 from openpilot.cereal import messaging
 from openpilot.cereal.visionipc import VisionStreamType
@@ -53,7 +54,7 @@ def main() -> None:
     sm.update(100)
     return signnet(x)
 
-  client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_ROAD, True)
+  client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_NARROW_ROAD, True)
   while not client.connect(False):
     time.sleep(0.1)
   cloudlog.warning(f"speedvisiond: {files.name} on the road camera, {client.width} x {client.height}")
@@ -71,7 +72,8 @@ def main() -> None:
       continue
     next_frame = now + PERIOD
 
-    y, uv = vision.nv12_planes(buf.data, buf.width, buf.height, buf.stride, buf.uv_offset)
+    data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
+    y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
     speed_limit = memory.update(now, [sign["speed"] for sign in signs if sign["speed"] is not None])
 
