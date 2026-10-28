@@ -14,14 +14,11 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType, SignReader
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 ALL_SOURCES = tuple(SpeedLimitSource.schema.enumerants.values())
-# The "Car" of a policy is whoever reads the signs (SpeedLimitSignReader): the car first, then the neural network. With
-# one reader the other one stays at 0, and a source at 0 is skipped.
-SIGN_SOURCES = (SpeedLimitSource.car, SpeedLimitSource.vision)
 
 
 class SpeedLimitResolver:
@@ -57,13 +54,8 @@ class SpeedLimitResolver:
       Policy.car_state_priority: [SpeedLimitSource.car, SpeedLimitSource.map],
       Policy.map_data_priority: [SpeedLimitSource.map, SpeedLimitSource.car],
       Policy.combined: [SpeedLimitSource.car, SpeedLimitSource.map],
+      Policy.map_data_vision: [SpeedLimitSource.vision, SpeedLimitSource.map],
     }
-    self.sign_reader = get_sanitize_int_param(
-      "SpeedLimitSignReader",
-      SignReader.min().value,
-      SignReader.max().value,
-      self.params
-    )
     self.source = SpeedLimitSource.none
     for source in ALL_SOURCES:
       self._reset_limit_sources(source)
@@ -101,7 +93,6 @@ class SpeedLimitResolver:
   def update_params(self):
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.policy = self.params.get("SpeedLimitPolicy", return_default=True)
-      self.sign_reader = self.params.get("SpeedLimitSignReader", return_default=True)
       self.is_metric = self.params.get_bool("IsMetric")
       self.offset_type = self.params.get("SpeedLimitOffsetType", return_default=True)
       self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
@@ -122,18 +113,13 @@ class SpeedLimitResolver:
 
   def _get_from_car_state(self, sm: messaging.SubMaster) -> None:
     self._reset_limit_sources(SpeedLimitSource.car)
-    if self.sign_reader != SignReader.vision:
-      self.limit_solutions[SpeedLimitSource.car] = sm['carStateSP'].speedLimit
+    self.limit_solutions[SpeedLimitSource.car] = sm['carStateSP'].speedLimit
     self.distance_solutions[SpeedLimitSource.car] = 0.
 
   def _get_from_vision(self, sm: messaging.SubMaster) -> None:
-    """The limit of the speed-limits neural network (speedVisionSP) when it reads the signs (with car_then_vision, only
-    while the car has none): 0 when it is not sure or speedvisiond is not running (a stale message is never used)."""
+    """The limit of the speed-limits neural network (speedVisionSP): 0 when it is not sure or speedvisiond is not
+    running (a stale message is never used). Only the policy Map Data + Vision takes it."""
     self._reset_limit_sources(SpeedLimitSource.vision)
-    if self.sign_reader == SignReader.car:
-      return
-    if self.sign_reader == SignReader.car_then_vision and self.limit_solutions[SpeedLimitSource.car] > 0.:
-      return
     try:
       alive = sm.alive['speedVisionSP']
       speed_limit = sm['speedVisionSP'].speedLimit
@@ -179,8 +165,7 @@ class SpeedLimitResolver:
         self.distance_solutions[SpeedLimitSource.map] = distance_to_speed_limit_ahead
 
   def _get_source_solution_according_to_policy(self) -> custom.LongitudinalPlanSP.SpeedLimit.Source:
-    sources_for_policy = [sign for source in self._policy_to_sources_map[Policy(self.policy)]
-                          for sign in (SIGN_SOURCES if source == SpeedLimitSource.car else (source,))]
+    sources_for_policy = self._policy_to_sources_map[Policy(self.policy)]
 
     if Policy(self.policy) != Policy.combined:
       # They are ordered in the order of preference, so we pick the first that's non-zero

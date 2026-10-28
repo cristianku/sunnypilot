@@ -14,14 +14,7 @@ class Policy(IntEnumBase):
   car_state_priority = 2
   map_data_priority = 3
   combined = 4
-
-
-class SignReader(IntEnumBase):
-  """Who reads the signs for the "Car" of the policy: the car, the speed-limits neural network, or the car and the
-  network when the car has no limit."""
-  car = 0
-  vision = 1
-  car_then_vision = 2
+  map_data_vision = 5  # the speed-limits neural network's limit (speedVisionSP) when it has one, else the map
 
 
 class OffsetType(IntEnumBase):

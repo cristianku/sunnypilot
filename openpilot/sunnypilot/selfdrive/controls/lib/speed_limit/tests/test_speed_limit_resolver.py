@@ -13,7 +13,7 @@ from openpilot.cereal import custom
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE
 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver, ALL_SOURCES
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, SignReader
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy
 from openpilot.common.test import OpenpilotTestCase
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
@@ -166,29 +166,24 @@ def setup_vision_sm_mock(mocker, car, vision, map_limit, vision_alive=True):
 class TestSpeedLimitResolverVision(OpenpilotTestCase):
 
   @parameterized.expand([
-    # reader, policy, car, vision, map, expected limit, expected source
-    (SignReader.vision, Policy.car_state_priority, 0., 22., 25., 22., SpeedLimitSource.vision),
-    # The network is not sure (0): the map, as when the car has no limit.
-    (SignReader.vision, Policy.car_state_priority, 0., 0., 25., 25., SpeedLimitSource.map),
-    (SignReader.vision, Policy.map_data_priority, 0., 22., 25., 25., SpeedLimitSource.map),
-    (SignReader.vision, Policy.map_data_priority, 0., 22., 0., 22., SpeedLimitSource.vision),
-    (SignReader.vision, Policy.car_state_only, 0., 0., 25., 0., SpeedLimitSource.none),
-    (SignReader.vision, Policy.combined, 0., 22., 25., 22., SpeedLimitSource.vision),
-    (SignReader.vision, Policy.combined, 0., 28., 25., 25., SpeedLimitSource.map),
-    # With the network as the reader the car's own limit is not used.
-    (SignReader.vision, Policy.car_state_priority, 30., 22., 25., 22., SpeedLimitSource.vision),
-    # The car first, the network only when the car has none.
-    (SignReader.car_then_vision, Policy.car_state_priority, 30., 22., 25., 30., SpeedLimitSource.car),
-    (SignReader.car_then_vision, Policy.car_state_priority, 0., 22., 25., 22., SpeedLimitSource.vision),
-    (SignReader.car_then_vision, Policy.combined, 30., 22., 25., 25., SpeedLimitSource.map),
-    (SignReader.car_then_vision, Policy.car_state_priority, 0., 0., 25., 25., SpeedLimitSource.map),
-    # The car alone, as before: the network is ignored.
-    (SignReader.car, Policy.car_state_priority, 0., 22., 25., 25., SpeedLimitSource.map),
-  ], names=["reader", "policy", "car", "vision", "map_limit", "expected", "expected_source"])
-  def test_sign_reader(self, resolver_class, reader, policy, car, vision, map_limit, expected, expected_source, mocker):
+    # policy, car, vision, map, expected limit, expected source
+    (Policy.map_data_vision, 0., 22., 25., 22., SpeedLimitSource.vision),
+    (Policy.map_data_vision, 0., 22., 0., 22., SpeedLimitSource.vision),
+    # The network is not sure (0): the map.
+    (Policy.map_data_vision, 0., 0., 25., 25., SpeedLimitSource.map),
+    (Policy.map_data_vision, 0., 0., 0., 0., SpeedLimitSource.none),
+    # Map Data + Vision does not use the car's own limit.
+    (Policy.map_data_vision, 30., 0., 25., 25., SpeedLimitSource.map),
+    (Policy.map_data_vision, 30., 22., 25., 22., SpeedLimitSource.vision),
+    # The other policies ignore the network, as before.
+    (Policy.car_state_priority, 0., 22., 25., 25., SpeedLimitSource.map),
+    (Policy.car_state_only, 0., 22., 25., 0., SpeedLimitSource.none),
+    (Policy.map_data_priority, 0., 22., 0., 0., SpeedLimitSource.none),
+    (Policy.combined, 0., 22., 25., 25., SpeedLimitSource.map),
+  ], names=["policy", "car", "vision", "map_limit", "expected", "expected_source"])
+  def test_map_data_vision(self, resolver_class, policy, car, vision, map_limit, expected, expected_source, mocker):
     resolver = resolver_class()
     resolver.policy = policy
-    resolver.sign_reader = reader
     resolver.update(20., setup_vision_sm_mock(mocker, car, vision, map_limit))
     assert resolver.speed_limit == expected
     assert resolver.source == expected_source
@@ -196,8 +191,7 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
   def test_stale_vision_ignored(self, resolver_class, mocker):
     # speedvisiond stopped: its last message is never used, the map takes over.
     resolver = resolver_class()
-    resolver.policy = Policy.car_state_priority
-    resolver.sign_reader = SignReader.vision
+    resolver.policy = Policy.map_data_vision
     resolver.update(20., setup_vision_sm_mock(mocker, 0., 22., 25., vision_alive=False))
     assert resolver.speed_limit == 25.
     assert resolver.source == SpeedLimitSource.map
@@ -205,8 +199,7 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
   def test_vision_not_subscribed(self, resolver_class, mocker):
     # A SubMaster without speedVisionSP (an older planner, a debug tool): no vision limit, no error.
     resolver = resolver_class()
-    resolver.policy = Policy.car_state_priority
-    resolver.sign_reader = SignReader.vision
+    resolver.policy = Policy.map_data_vision
     sm_mock = setup_sm_mock(mocker)
     resolver.update(20., sm_mock)
     assert resolver.limit_solutions[SpeedLimitSource.vision] == 0.

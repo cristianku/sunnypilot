@@ -15,23 +15,16 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.sunnypilot.widgets import get_highlighted_description
 
-SPEED_LIMIT_POLICY_BUTTONS = [tr("Car Only"), tr("Map Only"), tr("Car First"), tr("Map First"), tr("Combined")]
+SPEED_LIMIT_POLICY_BUTTONS = [tr("Car Only"), tr("Map Only"), tr("Car First"), tr("Map First"), tr("Combined"),
+                              tr("Map+Vision")]
 
 SPEED_LIMIT_POLICY_DESCRIPTIONS = [
   tr("Car Only: Use Speed Limit data only from Car"),
   tr("Map Only: Use Speed Limit data only from OpenStreetMaps"),
   tr("Car First: Use Speed Limit data from Car if available, else use from OpenStreetMaps"),
   tr("Map First: Use Speed Limit data from OpenStreetMaps if available, else use from Car"),
-  tr("Combined: Use combined Speed Limit data from Car & OpenStreetMaps")
-]
-
-# Who reads the signs for "Car" above: the car, the speed-limits neural network on the road camera, or both.
-SIGN_READER_BUTTONS = [tr("Car"), tr("Network"), tr("Car, then Network")]
-
-SIGN_READER_DESCRIPTIONS = [
-  tr("Car: Use Speed Limit signs read by the Car"),
-  tr("Network: Use Speed Limit signs read by the neural network from the road camera"),
-  tr("Car, then Network: Use Speed Limit signs read by the Car if available, else by the neural network"),
+  tr("Combined: Use combined Speed Limit data from Car & OpenStreetMaps"),
+  tr("Map+Vision: Use Speed Limit signs read by the neural network from the road camera if available, else use from OpenStreetMaps"),
 ]
 
 
@@ -52,27 +45,15 @@ class SpeedLimitPolicyLayout(Widget):
       param="SpeedLimitPolicy",
       button_width=250,
     )
-    self._sign_reader = multiple_button_item_sp(
-      title=lambda: tr("Signs Read By"),
-      description=self._get_sign_reader_description,
-      buttons=SIGN_READER_BUTTONS,
-      param="SpeedLimitSignReader",
-      button_width=350,
-    )
 
     items = [
-      self._speed_limit_policy,
-      self._sign_reader,
+      self._speed_limit_policy
     ]
     return items
 
   @staticmethod
   def _get_policy_description():
     return get_highlighted_description(ui_state.params, "SpeedLimitPolicy", SPEED_LIMIT_POLICY_DESCRIPTIONS)
-
-  @staticmethod
-  def _get_sign_reader_description():
-    return get_highlighted_description(ui_state.params, "SpeedLimitSignReader", SIGN_READER_DESCRIPTIONS)
 
   def _render(self, rect):
     self._back_button.set_position(self._rect.x, self._rect.y + 20)
@@ -84,4 +65,3 @@ class SpeedLimitPolicyLayout(Widget):
   def show_event(self):
     self._scroller.show_event()
     self._speed_limit_policy.show_description(True)
-    self._sign_reader.show_description(True)

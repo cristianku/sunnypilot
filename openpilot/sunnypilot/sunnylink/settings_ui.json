@@ -870,26 +870,10 @@
                     {
                       "value": 4,
                       "label": "Combined"
-                    }
-                  ]
-                },
-                {
-                  "key": "SpeedLimitSignReader",
-                  "widget": "multiple_button",
-                  "title": "Signs Read By",
-                  "description": "Who reads the signs for \"Car\" in Speed Limit Source: the car, the speed-limits neural network on the road camera, or the network only when the car has no limit. When the network is not sure it gives no limit and the map is used.",
-                  "options": [
-                    {
-                      "value": 0,
-                      "label": "Car"
                     },
                     {
-                      "value": 1,
-                      "label": "Network"
-                    },
-                    {
-                      "value": 2,
-                      "label": "Car, then Network"
+                      "value": 5,
+                      "label": "Map Data + Vision"
                     }
                   ]
                 },
