@@ -26,9 +26,9 @@ FONT_SIZE_3_DIGITS = 28
 LIFT = 62
 
 # Fuchsia, not the red and white of a road sign: the limit is read by the network, not a sign from the map or the car.
-FUCHSIA = rl.Color(176, 38, 212, 255)
+FUCHSIA = rl.Color(176, 38, 212, 165)  # see-through: the road shows under it
 FUCHSIA_LIGHT = rl.Color(226, 120, 248, 255)
-DARK_GREY = rl.Color(40, 40, 40, 230)
+DARK_GREY = rl.Color(40, 40, 40, 165)
 GREY = rl.Color(145, 155, 149, 255)
 
 
