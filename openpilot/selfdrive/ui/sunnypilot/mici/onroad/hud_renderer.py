@@ -30,9 +30,10 @@ class HudRendererSP(HudRenderer):
 
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
+    # In the bottom left corner, above the steering wheel while it shows; under the blind spot warning.
+    self.vision_speed_limit.set_lift(self._wheel_alpha_filter.x / (255 * 0.9))
+    self.vision_speed_limit.render(rect)
     self.blind_spot_indicators.render(rect)
-    if self._can_draw_top_icons:
-      self.vision_speed_limit.render(rect)
 
   def _has_blind_spot_detected(self) -> bool:
 

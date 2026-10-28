@@ -778,7 +778,7 @@
               "key": "SpeedLimitVisionDisplay",
               "widget": "toggle",
               "title": "Show Vision Speed Limit",
-              "description": "Show the speed limit the neural network reads from the road camera, in the top right corner of the driving screen. Information only, it does not change the speed. A grey ring means no reading. Always shown when Speed Limit Source is Map Data + Vision.",
+              "description": "Show the speed limit the neural network reads from the road camera, in a fuchsia square in the bottom left corner of the driving screen. Information only, it does not change the speed. A grey ring means no reading. Always shown when Speed Limit Source is Map Data + Vision.",
               "visibility": [
                 {
                   "type": "capability",
