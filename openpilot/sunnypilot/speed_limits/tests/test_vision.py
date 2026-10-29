@@ -249,9 +249,17 @@ def test_memory_out_of_a_car_park_into_a_town():
   assert drive(memory, 0.0, 4.0, road_type="parking", v_ego=2.0) == 0  # not long enough yet
   assert drive(memory, 4.0, 6.0, road_type="parking", v_ego=2.0) == vision.PARKING_LIMIT and memory.source == "parking"
   assert drive(memory, 6.0, 9.0, road_type="ramp", v_ego=4.0) == vision.PARKING_LIMIT  # not a road with a limit
-  assert drive(memory, 9.0, 10.0, road_type="town", v_ego=6.0) == 50 and memory.source == "road"  # the street
-  assert confirm(memory, 20.0, [30], road_type="town") == 30 and memory.source == "sign"
-  assert drive(memory, 21.0, 40.0, road_type="rural", v_ego=15.0) == 30  # a sign holds whatever the scene
+  assert drive(memory, 9.0, 18.0, road_type="town", v_ego=6.0) == vision.PARKING_LIMIT  # not long enough yet
+  assert drive(memory, 18.0, 20.0, road_type="town", v_ego=6.0) == 50 and memory.source == "road"  # the street
+  assert confirm(memory, 25.0, [30], road_type="town") == 30 and memory.source == "sign"
+  assert drive(memory, 26.0, 45.0, road_type="rural", v_ego=15.0) == 30  # a sign holds whatever the scene
+
+
+def test_memory_a_moment_of_a_street_inside_a_car_park_keeps_it():
+  memory = vision.SpeedLimitMemory()
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.PARKING_LIMIT
+  assert drive(memory, 6.0, 14.0, road_type="town", v_ego=5.0) == vision.PARKING_LIMIT  # the network unsure: 8 s
+  assert drive(memory, 14.0, 20.0, road_type="parking", v_ego=0.0) == vision.PARKING_LIMIT
 
 
 def test_memory_the_scene_gives_the_limit_only_without_a_sign():
@@ -272,7 +280,8 @@ def test_memory_a_car_park_needs_a_slow_car_and_drops_the_road_before():
   assert drive(memory, 24.0, 30.0, road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT
   assert confirm(memory, 40.0, [30], road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT  # higher: not taken
   assert confirm(memory, 45.0, [5], road_type="parking", v_ego=3.0) == 5  # lower: taken
-  assert drive(memory, 50.0, 51.0, road_type="rural", v_ego=8.0) == 80
+  assert drive(memory, 50.0, 59.0, road_type="rural", v_ego=8.0) == 5  # still the car park
+  assert drive(memory, 59.0, 61.0, road_type="rural", v_ego=8.0) == 80
 
 
 def test_car_motion_features():

@@ -99,7 +99,8 @@ MOTION_SECONDS = 1.0
 BLINKER_SECONDS = 2.0
 MOTION_MIN_SAMPLES = 10
 # Where no sign gives the limit the scene does: a car park gives PARKING_LIMIT once the network has seen it for
-# PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before; out of it, or where nothing is
+# PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before; out of it (a road type with a
+# general limit seen for ROAD_TYPE_SECONDS: a moment of a street inside a car park keeps it), or where nothing is
 # held, the road type seen gives its general limit (town: 50). Such a limit follows another road type only after
 # ROAD_TYPE_SECONDS of it; a sign always wins.
 PARKING_LIMIT = 10.0
@@ -458,8 +459,9 @@ class SpeedLimitMemory:
   carriageway the general limit of the road comes back.
 
   Where no sign gives the limit, the scene does (the road-type network): a car park gives PARKING_LIMIT (a sign there
-  only when lower) and drops the limit of the road before; leaving it, or with nothing held (the start of a drive), the
-  road type seen gives its general limit (a town: 50), which follows another road type only after ROAD_TYPE_SECONDS."""
+  only when lower) and drops the limit of the road before; leaving it (a road seen for ROAD_TYPE_SECONDS), or with
+  nothing held (the start of a drive), the road type seen gives its general limit (a town: 50), which follows another
+  road type only after ROAD_TYPE_SECONDS."""
   def __init__(self, country: str = DEFAULT_COUNTRY):
     self.speed_limit = 0.0
     self.country = country if country in IMPLICIT_LIMITS else DEFAULT_COUNTRY
@@ -517,7 +519,8 @@ class SpeedLimitMemory:
       self._parking_since = now
     parking = self._parking_since is not None and now - self._parking_since >= PARKING_SECONDS
 
-    if parking or self.source == "parking" and road_type not in ROAD_KINDS:
+    left = road_type in ROAD_KINDS and now - self._road_type_since >= ROAD_TYPE_SECONDS
+    if parking or self.source == "parking" and not left:
       # In a car park: its limit, a sign only when lower; the road before is dropped.
       if self.source != "parking" or numbers and 0 < numbers[0] < self.speed_limit:
         self._set(numbers[0] if numbers and 0 < numbers[0] < PARKING_LIMIT else PARKING_LIMIT, "parking")
