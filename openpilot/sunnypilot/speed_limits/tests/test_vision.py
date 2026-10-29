@@ -151,6 +151,8 @@ def test_memory_two_signs_at_once():
   memory.update(5.0, [100, 120])
   memory.update(5.2, [120])
   assert memory.update(5.4, [100, 120]) == 120  # the one seen most
+  memory.update(9.0, [0, 60])
+  assert memory.update(9.2, [0, 60]) == 60  # the end of a limit beside roadworks: not the general limit
 
 
 def confirm(memory, at, readings=(), signs=(), **context):

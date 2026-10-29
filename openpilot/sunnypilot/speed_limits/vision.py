@@ -340,8 +340,9 @@ class SpeedLimitMemory:
     for _, value in self._seen:
       counts[value] = counts.get(value, 0) + 1
     confirmed = [value for value in set(values) if counts[value] >= CONFIRM_FRAMES]
-    # Two at once (a gantry, a side road): the one seen most, the lower number on a tie.
-    return sorted(confirmed, key=lambda value: (-counts[value], value if isinstance(value, float) else 0.0))
+    # Two at once (a gantry, a side road, roadworks): the one seen most, the lower limit on a tie; the end of a limit
+    # (0) gives the road's general limit, never lower than a number, so a number wins the tie.
+    return sorted(confirmed, key=lambda value: (-counts[value], (value or math.inf) if isinstance(value, float) else 0.0))
 
   def _general(self, road: str | None) -> float:
     limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
