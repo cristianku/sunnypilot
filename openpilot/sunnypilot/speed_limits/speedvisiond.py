@@ -61,7 +61,6 @@ def main() -> None:
     time.sleep(0.1)
   cloudlog.warning(f"speedvisiond: {files.name} on the road camera, {client.width} x {client.height}")
 
-  car = messaging.SubMaster(["carState"])  # apart from sm, whose update waits for the driving model
   pm = messaging.PubMaster(["speedVisionSP"])
   signnet_input = vision.SignNetInput(client.width, client.height)
   memory = vision.SpeedLimitMemory()
@@ -78,11 +77,9 @@ def main() -> None:
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
-    car.update(0)
-    speed_kph = car["carState"].vEgo * CV.MS_TO_KPH if car.seen["carState"] else None
     sure = [sign for sign in signs if sign["confidence"] >= vision.MIN_CONFIDENCE]
     speed_limit = memory.update(now, [sign["speed"] for sign in sure if sign["speed"] is not None],
-                                [sign["class"] for sign in sure], speed_kph=speed_kph)
+                                [sign["class"] for sign in sure])
 
     msg = messaging.new_message("speedVisionSP", valid=True)
     msg.speedVisionSP.speedLimit = float(speed_limit * CV.KPH_TO_MS)

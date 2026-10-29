@@ -53,14 +53,11 @@ ROAD_SIGNS = {
   "other_sign:town_entry": "town",
   "other_sign:town_exit": "rural",
 }
-# A number read within RAMP_SECONDS of a motorway or expressway sign is the limit of the ramp: it ends when the car is
-# on the main carriageway, which the road-type network sees (MERGE_SECONDS of "motorway" or "expressway" in a row) or,
-# without it, the car tells (MERGE_SECONDS above the ramp's limit by MERGE_MARGIN km/h).
+# A number read on a ramp (the road-type network says so) or within RAMP_SECONDS of a motorway or expressway sign is the
+# limit of the ramp: it ends when the road-type network, which remembers the ramp, sees the main carriageway
+# (MERGE_SECONDS of "motorway" or "expressway" in a row). Without the network it holds until the next sign.
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8.0
-MERGE_MARGIN = 20.0
-# Below this speed (km/h) the car is not on a carriageway (a jam, a toll): the time above the ramp limit starts again.
-MERGE_MIN_SPEED = 70.0
 
 PRECISION_BITS = 22  # PIL's fixed point for 8-bit images (Resample.c)
 
@@ -320,9 +317,9 @@ class SpeedLimitMemory:
   sets the general limit of that road (IMPLICIT_LIMITS of the country); so does the end of a limit, on a road whose
   kind is known (else 0, no limit).
 
-  The limit of a ramp ends on the main carriageway, where no sign ends it: a number read within RAMP_SECONDS of a
-  motorway or expressway sign is taken as the ramp's, and once the car is on the carriageway (road_type from the
-  road-type network, or the car's speed when there is none) the general limit of the road comes back."""
+  The limit of a ramp ends on the main carriageway, where no sign ends it: a number read on a ramp or within
+  RAMP_SECONDS of a motorway or expressway sign is taken as the ramp's, and once the road-type network sees the
+  carriageway the general limit of the road comes back."""
   def __init__(self, country: str = DEFAULT_COUNTRY):
     self.speed_limit = 0.0
     self.country = country if country in IMPLICIT_LIMITS else DEFAULT_COUNTRY
@@ -348,11 +345,10 @@ class SpeedLimitMemory:
     limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
     return float(limit or 0)
 
-  def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (), road_type: str | None = None,
-             speed_kph: float | None = None) -> float:
+  def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
+             road_type: str | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
-    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it;
-    speed_kph: the car's speed, None when unknown."""
+    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it."""
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
     numbers = [value for value in confirmed if isinstance(value, float)]
@@ -374,25 +370,19 @@ class SpeedLimitMemory:
         self._ramp_limit = False
       else:
         self.speed_limit = value
-        on_ramp = road_type == "ramp"
-        self._ramp_limit = on_ramp or (now - self._road_sign_at <= RAMP_SECONDS and road_type is None)
+        self._ramp_limit = road_type == "ramp" or now - self._road_sign_at <= RAMP_SECONDS
       self._merge_since = None
       return self.speed_limit
 
     if self._ramp_limit:
-      if road_type is not None:
-        merged = road_type in ("motorway", "expressway")
-      else:
-        merged = (speed_kph is not None and speed_kph >= MERGE_MIN_SPEED
-                  and speed_kph >= self.speed_limit + MERGE_MARGIN)
+      merged = road_type in ("motorway", "expressway")
       if not merged:
         self._merge_since = None
       elif self._merge_since is None:
         self._merge_since = now
       elif now - self._merge_since >= MERGE_SECONDS:
-        road = road_type if road_type in ("motorway", "expressway") else (self.road or "motorway")
-        self.road = road
-        self.speed_limit = self._general(road)
+        self.road = road_type
+        self.speed_limit = self._general(road_type)
         self._ramp_limit = False
         self._merge_since = None
     return self.speed_limit
