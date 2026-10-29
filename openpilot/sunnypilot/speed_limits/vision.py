@@ -34,6 +34,34 @@ CONFIRM_SECONDS = 1.5
 SPEED_KINDS = ("maximum_speed", "variable_display", "zone", "road_marking")
 CANCELLATION = "cancellation"
 
+# The general limits that hold where no number is signed (km/h; None: no general limit), by country, for the kind of
+# road: in a town, outside towns, on an expressway (Autostrasse), on a motorway.
+IMPLICIT_LIMITS = {
+  "CH": {"town": 50, "rural": 80, "expressway": 100, "motorway": 120},
+  "AT": {"town": 50, "rural": 100, "expressway": 100, "motorway": 130},
+  "IT": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
+  "FR": {"town": 50, "rural": 80, "expressway": 110, "motorway": 130},
+  "DE": {"town": 50, "rural": 100, "expressway": None, "motorway": None},
+}
+DEFAULT_COUNTRY = "CH"
+# The signs that say which kind of road begins: their general limit replaces the limit held.
+ROAD_SIGNS = {
+  "other_sign:motorway_start": "motorway",
+  "other_sign:motorway_end": "rural",
+  "other_sign:expressway_start": "expressway",
+  "other_sign:expressway_end": "rural",
+  "other_sign:town_entry": "town",
+  "other_sign:town_exit": "rural",
+}
+# A number read within RAMP_SECONDS of a motorway or expressway sign is the limit of the ramp: it ends when the car is
+# on the main carriageway, which the road-type network sees (MERGE_SECONDS of "motorway" or "expressway" in a row) or,
+# without it, the car tells (MERGE_SECONDS above the ramp's limit by MERGE_MARGIN km/h).
+RAMP_SECONDS = 45.0
+MERGE_SECONDS = 8.0
+MERGE_MARGIN = 20.0
+# Below this speed (km/h) the car is not on a carriageway (a jam, a toll): the time above the ramp limit starts again.
+MERGE_MIN_SPEED = 70.0
+
 PRECISION_BITS = 22  # PIL's fixed point for 8-bit images (Resample.c)
 
 
@@ -287,20 +315,81 @@ def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finde
 
 
 class SpeedLimitMemory:
-  """The limit shown (km/h, 0: none): a reading confirmed in CONFIRM_FRAMES frames within CONFIRM_SECONDS, held
-  until another reading is confirmed. A confirmed end of the limit (0) clears it."""
-  def __init__(self):
-    self.speed_limit = 0.0
-    self._seen: list[tuple[float, float]] = []
+  """The limit shown (km/h, 0: none). A number becomes the limit when it is read in CONFIRM_FRAMES frames within
+  CONFIRM_SECONDS, and stays until another one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
+  sets the general limit of that road (IMPLICIT_LIMITS of the country); so does the end of a limit, on a road whose
+  kind is known (else 0, no limit).
 
-  def update(self, now: float, readings: list[float]) -> float:
+  The limit of a ramp ends on the main carriageway, where no sign ends it: a number read within RAMP_SECONDS of a
+  motorway or expressway sign is taken as the ramp's, and once the car is on the carriageway (road_type from the
+  road-type network, or the car's speed when there is none) the general limit of the road comes back."""
+  def __init__(self, country: str = DEFAULT_COUNTRY):
+    self.speed_limit = 0.0
+    self.country = country if country in IMPLICIT_LIMITS else DEFAULT_COUNTRY
+    self.road: str | None = None  # the kind of road from the last road sign or the road-type network
+    self._seen: list[tuple[float, float | str]] = []
+    self._road_sign_at = -math.inf  # when the last motorway or expressway sign was confirmed
+    self._ramp_limit = False  # the limit held is a ramp's
+    self._merge_since: float | None = None
+
+  def _confirmed(self, now: float, values: list) -> list:
     self._seen = [(t, value) for t, value in self._seen if now - t <= CONFIRM_SECONDS]
-    self._seen += [(now, value) for value in set(readings)]
-    counts: dict[float, int] = {}
+    self._seen += [(now, value) for value in set(values)]
+    counts: dict = {}
     for _, value in self._seen:
       counts[value] = counts.get(value, 0) + 1
-    confirmed = [value for value in set(readings) if counts[value] >= CONFIRM_FRAMES]
-    if confirmed:
-      # Two signs confirmed at once (a gantry, a side road): the one seen most, the lower on a tie.
-      self.speed_limit = min(confirmed, key=lambda value: (-counts[value], value))
+    confirmed = [value for value in set(values) if counts[value] >= CONFIRM_FRAMES]
+    # Two at once (a gantry, a side road): the one seen most, the lower number on a tie.
+    return sorted(confirmed, key=lambda value: (-counts[value], value if isinstance(value, float) else 0.0))
+
+  def _general(self, road: str | None) -> float:
+    limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
+    return float(limit or 0)
+
+  def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (), road_type: str | None = None,
+             speed_kph: float | None = None) -> float:
+    """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
+    road_type: what the road-type network sees (town, rural, expressway, motorway, motorway_ramp...), None without it;
+    speed_kph: the car's speed, None when unknown."""
+    roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
+    confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
+    numbers = [value for value in confirmed if isinstance(value, float)]
+    road_signs = [value for value in confirmed if isinstance(value, str)]
+
+    if road_signs:
+      self.road = road_signs[0]
+      self.speed_limit = self._general(self.road)
+      self._ramp_limit = False
+      if self.road in ("motorway", "expressway"):
+        self._road_sign_at = now
+    if road_type in ("town", "rural", "expressway", "motorway") and not road_signs:
+      self.road = road_type
+    if numbers:
+      value = numbers[0]
+      if value == 0:
+        self.speed_limit = self._general(self.road)
+        self._ramp_limit = False
+      else:
+        self.speed_limit = value
+        on_ramp = road_type is not None and road_type.endswith("_ramp")
+        self._ramp_limit = on_ramp or (now - self._road_sign_at <= RAMP_SECONDS and road_type is None)
+      self._merge_since = None
+      return self.speed_limit
+
+    if self._ramp_limit:
+      if road_type is not None:
+        merged = road_type in ("motorway", "expressway")
+      else:
+        merged = (speed_kph is not None and speed_kph >= MERGE_MIN_SPEED
+                  and speed_kph >= self.speed_limit + MERGE_MARGIN)
+      if not merged:
+        self._merge_since = None
+      elif self._merge_since is None:
+        self._merge_since = now
+      elif now - self._merge_since >= MERGE_SECONDS:
+        road = road_type if road_type in ("motorway", "expressway") else (self.road or "motorway")
+        self.road = road
+        self.speed_limit = self._general(road)
+        self._ramp_limit = False
+        self._merge_since = None
     return self.speed_limit

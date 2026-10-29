@@ -151,3 +151,58 @@ def test_memory_two_signs_at_once():
   memory.update(5.0, [100, 120])
   memory.update(5.2, [120])
   assert memory.update(5.4, [100, 120]) == 120  # the one seen most
+
+
+def confirm(memory, at, readings=(), signs=(), **context):
+  memory.update(at, list(readings), list(signs), **context)
+  return memory.update(at + 0.2, list(readings), list(signs), **context)
+
+
+def test_memory_road_signs_set_the_general_limit():
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, signs=["other_sign:town_entry"]) == 50
+  assert confirm(memory, 5.0, [30]) == 30
+  assert confirm(memory, 9.0, [0]) == 50  # the end of the 30 in a town: the town's 50
+  assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == 80
+  assert confirm(memory, 30.0, signs=["other_sign:give_way"]) == 80  # not a sign of the road's kind
+  assert vision.SpeedLimitMemory("IT").update(0.0, [], ["other_sign:motorway_start"]) == 0
+  assert confirm(vision.SpeedLimitMemory("IT"), 0.0, signs=["other_sign:motorway_start"]) == 130
+
+
+def test_memory_ramp_limit_ends_on_the_motorway_by_speed():
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == 120
+  assert confirm(memory, 10.0, [60]) == 60  # the ramp's 60
+  for t in range(12, 20):
+    assert memory.update(float(t), [], speed_kph=65.0) == 60  # still on the ramp
+  for t in range(20, 28):
+    assert memory.update(float(t), [], speed_kph=95.0) == 60  # accelerating on the carriageway, not long enough
+  assert memory.update(28.0, [], speed_kph=100.0) == 120  # MERGE_SECONDS above the ramp's limit
+  assert memory.road == "motorway"
+
+
+def test_memory_ramp_limit_ends_by_the_road_type_network():
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  assert confirm(memory, 100.0, [60], road_type="motorway_ramp") == 60  # far from the sign, the network says ramp
+  assert memory.update(101.0, [], road_type="motorway_ramp", speed_kph=120.0) == 60  # the network wins over speed
+  for t in range(102, 110):
+    memory.update(float(t), [], road_type="motorway")
+  assert memory.update(110.0, [], road_type="motorway") == 120
+
+
+def test_memory_motorway_limit_is_not_a_ramp_limit():
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  assert confirm(memory, 300.0, [80]) == 80  # roadworks long after the entry
+  for t in range(301, 320):
+    assert memory.update(float(t), [], speed_kph=110.0) == 80  # driving fast does not end it
+
+
+def test_memory_germany_has_no_general_motorway_limit():
+  memory = vision.SpeedLimitMemory("DE")
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  assert confirm(memory, 5.0, [80]) == 80
+  for t in range(7, 16):
+    memory.update(float(t), [], speed_kph=130.0)
+  assert memory.speed_limit == 0  # no limit

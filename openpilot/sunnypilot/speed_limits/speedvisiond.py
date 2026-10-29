@@ -7,8 +7,10 @@ See the LICENSE.md file in the root directory for more details.
 
 speedvisiond: the speed limit read on the road camera by the speed-limits networks (speedVisionSP, m/s, 0 when there
 is no reading), a few times a second. SignNet finds the signs in the top of the frame, the classifier reads each,
-and a reading becomes the limit when two frames agree; it stays until another sign. It runs when Show Vision Speed
-Limit is on or Speed Limit Source is Map Data + Vision.
+and a reading becomes the limit when two frames agree; it stays until another sign. A sign of the kind of road (a
+motorway, a town, their ends) gives the road's general limit, and the limit of a motorway ramp ends once the car is
+on the carriageway (vision.SpeedLimitMemory). It runs when Show Vision Speed Limit is on or Speed Limit Source is Map
+Data + Vision.
 """
 import os
 os.environ['GMMU'] = '0'
@@ -59,6 +61,7 @@ def main() -> None:
     time.sleep(0.1)
   cloudlog.warning(f"speedvisiond: {files.name} on the road camera, {client.width} x {client.height}")
 
+  car = messaging.SubMaster(["carState"])  # apart from sm, whose update waits for the driving model
   pm = messaging.PubMaster(["speedVisionSP"])
   signnet_input = vision.SignNetInput(client.width, client.height)
   memory = vision.SpeedLimitMemory()
@@ -75,7 +78,11 @@ def main() -> None:
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
-    speed_limit = memory.update(now, [sign["speed"] for sign in signs if sign["speed"] is not None])
+    car.update(0)
+    speed_kph = car["carState"].vEgo * CV.MS_TO_KPH if car.seen["carState"] else None
+    sure = [sign for sign in signs if sign["confidence"] >= vision.MIN_CONFIDENCE]
+    speed_limit = memory.update(now, [sign["speed"] for sign in sure if sign["speed"] is not None],
+                                [sign["class"] for sign in sure], speed_kph=speed_kph)
 
     msg = messaging.new_message("speedVisionSP", valid=True)
     msg.speedVisionSP.speedLimit = float(speed_limit * CV.KPH_TO_MS)
