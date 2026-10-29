@@ -80,10 +80,6 @@ ROAD_SIGNS = {
 # (MERGE_SECONDS of "motorway" or "expressway" in a row). Without the network it holds until the next sign.
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8.0
-# A sign holds at most to the next junction (OSStr art. 16): when the map's limit changes, the car is on another road
-# and the limit read on the road before gives way to the map's, once the map has held it MAP_SECONDS (the GPS beside a
-# parallel road). A sign read after that wins again.
-MAP_SECONDS = 3.0
 
 PRECISION_BITS = 22  # PIL's fixed point for 8-bit images (Resample.c)
 
@@ -341,8 +337,8 @@ class SpeedLimitMemory:
   """The limit shown (km/h, 0: none). A number becomes the limit when it is read in CONFIRM_FRAMES frames within
   CONFIRM_SECONDS, and stays until another one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
   sets the general limit of that road (IMPLICIT_LIMITS of the country; where ROAD_SIGN_KEEPS_LIMIT, only when no limit
-  is held); so does the end of a limit, on a road whose
-  kind is known (else 0, no limit). When the map's limit changes (another road), the map's new limit replaces it.
+  is held); so does the end of a limit, on a road whose kind is known (else 0, no limit). The camera only: the map is
+  another source, which the speed-limit resolver weighs against this one.
 
   The limit of a ramp ends on the main carriageway, where no sign ends it: a number read on a ramp or within
   RAMP_SECONDS of a motorway or expressway sign is taken as the ramp's, and once the road-type network sees the
@@ -355,8 +351,6 @@ class SpeedLimitMemory:
     self._road_sign_at = -math.inf  # when the last motorway or expressway sign was confirmed
     self._ramp_limit = False  # the limit held is a ramp's
     self._merge_since: float | None = None
-    self._map_limit: float | None = None  # the map's limit on the road where the limit held was set (km/h)
-    self._map_change: tuple[float, float] | None = None  # the map's new limit and since when
     self.sign_read = False  # a number or a road sign was confirmed in the last update (the limit held again too)
 
   def _confirmed(self, now: float, values: list) -> list:
@@ -374,40 +368,15 @@ class SpeedLimitMemory:
     limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
     return float(limit or 0)
 
-  def _follow_map(self, now: float, map_limit: float | None) -> bool:
-    """Whether the map's limit changed and held MAP_SECONDS: the limit held becomes the map's."""
-    if map_limit is None or map_limit == self._map_limit:
-      self._map_change = None
-      return False
-    if self._map_change is None or self._map_change[0] != map_limit:
-      self._map_change = (map_limit, now)
-      return False
-    if now - self._map_change[1] < MAP_SECONDS:
-      return False
-    self._map_limit = map_limit
-    self._map_change = None
-    if self.speed_limit <= 0:  # nothing held (or no limit): the map is used as it is
-      return False
-    self.speed_limit = map_limit
-    self._ramp_limit = False
-    self._merge_since = None
-    return True
-
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
-             road_type: str | None = None, map_limit: float | None = None) -> float:
+             road_type: str | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
-    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it;
-    map_limit: the map's limit here (km/h), None when the map has none."""
+    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it."""
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
     numbers = [value for value in confirmed if isinstance(value, float)]
     road_signs = [value for value in confirmed if isinstance(value, str)]
     self.sign_read = bool(confirmed)
-    if confirmed:
-      self._map_limit = map_limit
-      self._map_change = None
-    elif self._follow_map(now, map_limit):
-      return self.speed_limit
 
     if road_signs:
       self.road = road_signs[0]

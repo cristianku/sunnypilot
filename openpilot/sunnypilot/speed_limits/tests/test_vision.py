@@ -213,36 +213,6 @@ def test_memory_motorway_limit_is_not_a_ramp_limit():
     assert memory.update(float(t), [], road_type="motorway") == 80  # the motorway does not end it
 
 
-def test_memory_follows_the_map_on_another_road():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [60]) == 60  # the ramp's 60, no limit on the ramp in the map
-  for t in range(2, 5):
-    assert memory.update(float(t), [], map_limit=120) == 60  # the map's 120 not held long enough
-  assert memory.update(5.0, [], map_limit=120) == 120  # on the motorway: the map's limit
-  assert confirm(memory, 20.0, [80], map_limit=120) == 80  # roadworks: the sign wins
-  for t in range(22, 60):
-    assert memory.update(float(t), [], map_limit=120) == 80  # the same road in the map: the 80 holds
-
-
-def test_memory_a_wrong_branch_sign_ends_with_the_road():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [40], map_limit=60) == 40  # the other branch's 40 on our ramp
-  memory.update(3.0, [], map_limit=120)
-  memory.update(4.0, [], map_limit=60)  # the GPS beside the motorway for a second
-  assert memory.update(7.0, [], map_limit=120) == 40
-  assert memory.update(10.0, [], map_limit=120) == 120
-
-
-def test_memory_without_a_limit_leaves_the_map_alone():
-  memory = vision.SpeedLimitMemory()
-  for t in range(10):
-    assert memory.update(float(t), [], map_limit=50 if t < 5 else 80) == 0  # nothing read: the map is used as it is
-  assert confirm(memory, 20.0, [60], map_limit=80) == 60
-  for t in range(22, 26):
-    memory.update(float(t), [], map_limit=None)  # the map has no limit here: nothing changes
-  assert memory.speed_limit == 60
-
-
 def test_memory_germany_has_no_general_motorway_limit():
   memory = vision.SpeedLimitMemory("DE")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
