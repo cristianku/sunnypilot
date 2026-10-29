@@ -482,6 +482,7 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
 struct SpeedVisionSP @0xcb9fd56c7057593a {
   speedLimit @0 :Float32;  # m/s, 0 when not sure
   modelName @1 :Text;
+  signRead @2 :Bool;  # a sign was read and confirmed in this frame (the same limit again too): the UI pulses
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

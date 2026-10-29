@@ -87,6 +87,7 @@ def main() -> None:
     msg = messaging.new_message("speedVisionSP", valid=True)
     msg.speedVisionSP.speedLimit = float(speed_limit * CV.KPH_TO_MS)
     msg.speedVisionSP.modelName = files.name
+    msg.speedVisionSP.signRead = memory.sign_read
     pm.send("speedVisionSP", msg)
 
 

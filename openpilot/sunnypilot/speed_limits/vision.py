@@ -331,6 +331,7 @@ class SpeedLimitMemory:
     self._road_sign_at = -math.inf  # when the last motorway or expressway sign was confirmed
     self._ramp_limit = False  # the limit held is a ramp's
     self._merge_since: float | None = None
+    self.sign_read = False  # a number or a road sign was confirmed in the last update (the limit held again too)
 
   def _confirmed(self, now: float, values: list) -> list:
     self._seen = [(t, value) for t, value in self._seen if now - t <= CONFIRM_SECONDS]
@@ -355,6 +356,7 @@ class SpeedLimitMemory:
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
     numbers = [value for value in confirmed if isinstance(value, float)]
     road_signs = [value for value in confirmed if isinstance(value, str)]
+    self.sign_read = bool(confirmed)
 
     if road_signs:
       self.road = road_signs[0]

@@ -4,6 +4,8 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
+import math
+
 import pyray as rl
 
 from openpilot.common.constants import CV
@@ -24,6 +26,10 @@ FONT_SIZE = 34
 FONT_SIZE_3_DIGITS = 28
 # How far up the square moves while the steering wheel shows in the bottom left corner: above it.
 LIFT = 62
+# A sign read (signRead, the same limit again too) makes the square pulse: it grows by PULSE_GROW of its side and back
+# in PULSE_SECONDS, its border white, so the driver sees the network has read it.
+PULSE_SECONDS = 0.6
+PULSE_GROW = 0.18
 
 # Fuchsia, not the red and white of a road sign: the limit is read by the network, not a sign from the map or the car.
 FUCHSIA = rl.Color(176, 38, 212, 115)  # see-through (45 %): the road shows under it
@@ -36,13 +42,15 @@ class VisionSpeedLimit(Widget):
   """The speed limit read by the speed-limits neural network (speedVisionSP), drawn in the bottom left corner when
   Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision: a fuchsia square with an eye and the limit
   in white, always visible (alerts are drawn at the top). The drawing does not change the speed. A dark square with a
-  dash means no reading: the network is not sure, or speedvisiond is not running."""
+  dash means no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read,
+  even one that gives the limit already shown."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
     self._eye: rl.Texture = gui_app.texture("icons_mici/onroad/eye_fill.png", EYE_WIDTH, EYE_HEIGHT)
     self._speed_limit: float = 0.
     self._lift: float = 0.
+    self._pulse_at: float = -math.inf
 
   def set_lift(self, lift: float) -> None:
     """0 in the corner, 1 above the steering wheel (while it shows); in between while it fades."""
@@ -51,6 +59,8 @@ class VisionSpeedLimit(Widget):
   def _update_state(self) -> None:
     sm = ui_state.sm
     speed_limit = sm['speedVisionSP'].speedLimit if sm.alive['speedVisionSP'] else 0.
+    if sm.alive['speedVisionSP'] and sm.updated['speedVisionSP'] and sm['speedVisionSP'].signRead:
+      self._pulse_at = rl.get_time()
     self._speed_limit = max(0., speed_limit) * (CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH)
 
   def _render(self, rect: rl.Rectangle) -> None:
@@ -59,6 +69,13 @@ class VisionSpeedLimit(Widget):
 
     box = rl.Rectangle(rect.x + MARGIN, rect.y + rect.height - MARGIN - SIZE - LIFT * self._lift, SIZE, SIZE)
     has_limit = round(self._speed_limit) > 0
+    since = rl.get_time() - self._pulse_at
+    pulse = math.sin(math.pi * since / PULSE_SECONDS) if 0 <= since < PULSE_SECONDS else 0.
+    if pulse > 0:
+      grow = SIZE * PULSE_GROW * pulse
+      outer = rl.Rectangle(box.x - grow / 2, box.y - grow / 2, SIZE + grow, SIZE + grow)
+      rl.draw_rectangle_rounded(outer, ROUNDNESS, SEGMENTS, rl.Color(226, 120, 248, int(90 * pulse)))
+      rl.draw_rectangle_rounded_lines_ex(outer, ROUNDNESS, SEGMENTS, BORDER, rl.Color(255, 255, 255, int(255 * pulse)))
     rl.draw_rectangle_rounded(box, ROUNDNESS, SEGMENTS, FUCHSIA if has_limit else DARK_GREY)
     rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, FUCHSIA_LIGHT if has_limit else FUCHSIA)
 

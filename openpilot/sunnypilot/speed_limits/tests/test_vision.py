@@ -134,8 +134,8 @@ def test_read_signs():
 def test_memory_confirms_and_holds():
   memory = vision.SpeedLimitMemory()
   assert memory.update(0.0, [60]) == 0  # one frame is not enough
-  assert memory.update(0.2, [60]) == 60
-  assert memory.update(0.4, []) == 60  # held without a sign
+  assert memory.update(0.2, [60]) == 60 and memory.sign_read
+  assert memory.update(0.4, []) == 60 and not memory.sign_read  # held without a sign
   assert memory.update(10.0, [80]) == 60
   assert memory.update(12.0, [80]) == 60  # too far apart
   assert memory.update(12.4, [80]) == 80
@@ -165,6 +165,8 @@ def test_memory_road_signs_set_the_general_limit():
   assert confirm(memory, 9.0, [0]) == 50  # the end of the 30 in a town: the town's 50
   assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == 80
   assert confirm(memory, 30.0, signs=["other_sign:give_way"]) == 80  # not a sign of the road's kind
+  assert not memory.sign_read
+  assert confirm(memory, 40.0, signs=["other_sign:town_exit"]) == 80 and memory.sign_read  # the same limit read again
   assert vision.SpeedLimitMemory("IT").update(0.0, [], ["other_sign:motorway_start"]) == 0
   assert confirm(vision.SpeedLimitMemory("IT"), 0.0, signs=["other_sign:motorway_start"]) == 130
 
