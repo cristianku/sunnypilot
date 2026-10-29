@@ -483,6 +483,7 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   speedLimit @0 :Float32;  # m/s, 0 when not sure
   modelName @1 :Text;
   signRead @2 :Bool;  # a sign was read and confirmed in this frame (the same limit again too): the UI pulses
+  roadType @3 :Text;  # what the road-type network sees (town, rural, expressway, motorway, ramp, parking), "" without it
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

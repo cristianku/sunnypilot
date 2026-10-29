@@ -84,6 +84,29 @@ ROAD_SIGNS = {
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8.0
 
+# The road-type network (optional in a release, RoadTypeReader): one step a second on the whole frame at 256 x 144, its
+# memory carried from step to step; its answer counts once the same class comes ROAD_TYPE_DEBOUNCE steps in a row.
+ROAD_TYPE_WIDTH = 256
+ROAD_TYPE_HEIGHT = 144
+ROAD_TYPE_PERIOD = 1.0
+ROAD_TYPE_DEBOUNCE = 3
+ROAD_TYPE_RESET_SECONDS = 5.0  # longer without a step: its memory starts again from zeros
+ROAD_KINDS = ("town", "rural", "expressway", "motorway")  # the road types with a general limit
+SIGN_AGE_MAX = 120.0
+# The car's motion input (car_motion.motion_features of the training): the samples of the last second, the blinkers of
+# the last two; fewer than MOTION_MIN_SAMPLES in the second and that part is unknown.
+MOTION_SECONDS = 1.0
+BLINKER_SECONDS = 2.0
+MOTION_MIN_SAMPLES = 10
+# Where no sign gives the limit the scene does: a car park gives PARKING_LIMIT once the network has seen it for
+# PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before; out of it, or where nothing is
+# held, the road type seen gives its general limit (town: 50). Such a limit follows another road type only after
+# ROAD_TYPE_SECONDS of it; a sign always wins.
+PARKING_LIMIT = 15.0
+PARKING_SECONDS = 5.0
+PARKING_MAX_SPEED = 25 / 3.6
+ROAD_TYPE_SECONDS = 10.0
+
 PRECISION_BITS = 22  # PIL's fixed point for 8-bit images (Resample.c)
 
 
@@ -253,6 +276,93 @@ class SignNetInput:
     return np.divide(pixels, 255.0, out=pixels)
 
 
+class RoadTypeInput:
+  """The road-type network's image for frames of one size: the whole frame at ROAD_TYPE_WIDTH x ROAD_TYPE_HEIGHT, RGB
+  float 0..1 (1, 3, ROAD_TYPE_HEIGHT, ROAD_TYPE_WIDTH), bit for bit the frames of its training (road_type_data)."""
+  def __init__(self, width: int, height: int):
+    self.width, self.height = width, height
+    self.columns = ColumnResampler(width, ROAD_TYPE_WIDTH) if width != ROAD_TYPE_WIDTH else None
+    self.rows = resample_coefficients(height, ROAD_TYPE_HEIGHT)
+
+  def __call__(self, y: np.ndarray, uv: np.ndarray) -> np.ndarray:
+    planes = yuv_to_rgb(y, uv, 0, self.height, 0, self.width)
+    if self.columns is not None:
+      planes = self.columns(planes)
+    pixels = resample_rows(planes, *self.rows)[None].astype(np.float32)
+    return np.divide(pixels, 255.0, out=pixels)
+
+
+class CarMotion:
+  """The car's own signals of the last seconds as the road-type network's motion input: the yaw rate (deviceMotion), the
+  steering angle and the blinkers (carState). Never the map."""
+  def __init__(self):
+    self.yaw: list[tuple[float, float]] = []  # (time, yaw rate deg/s, left positive) of the valid samples
+    self.car: list[tuple[float, float, bool, bool, float]] = []  # (time, steering deg, left, right, yawRate deg/s)
+
+  def add_device_motion(self, now: float, z: float, valid: bool) -> None:
+    """angularVelocityDevice.z (rad/s): the device's z points down, so the yaw (left positive) is -z."""
+    if valid:
+      self.yaw.append((now, -math.degrees(z)))
+
+  def add_car_state(self, now: float, steering_deg: float, left: bool, right: bool, yaw_rate: float) -> None:
+    """carState: steeringAngleDeg (left positive), the blinkers, yawRate (rad/s, left positive; 0 on cars without it)."""
+    self.car.append((now, steering_deg, left, right, math.degrees(yaw_rate)))
+
+  def features(self, now: float) -> np.ndarray:
+    """(1, 8): heading change, largest yaw, yaw known, steering, steering known, left, right, blinkers known."""
+    self.yaw = [s for s in self.yaw if now - s[0] < BLINKER_SECONDS]
+    self.car = [s for s in self.car if now - s[0] < BLINKER_SECONDS]
+    step = [s for s in self.car if now - s[0] < MOTION_SECONDS]
+    yaw = [rate for t, rate in self.yaw if now - t < MOTION_SECONDS]
+    if len(yaw) < MOTION_MIN_SAMPLES and len(step) >= MOTION_MIN_SAMPLES and any(s[4] != 0 for s in step):
+      yaw = [s[4] for s in step]
+    motion = np.zeros((1, 8), dtype=np.float32)
+    if len(yaw) >= MOTION_MIN_SAMPLES:
+      motion[0, :3] = np.clip(np.mean(yaw) / 30, -3, 3), np.clip(max(abs(rate) for rate in yaw) / 30, 0, 3), 1
+    if len(step) >= MOTION_MIN_SAMPLES:
+      motion[0, 3:5] = np.clip(np.mean([s[1] for s in step]) / 180, -4, 4), 1
+      motion[0, 5:8] = any(s[2] for s in self.car), any(s[3] for s in self.car), 1
+    return motion
+
+
+class RoadTypeReader:
+  """The road-type network step by step (one step every ROAD_TYPE_PERIOD): the frame, the speed, how long ago a
+  motorway or expressway sign was confirmed and the car's motion in, the probabilities out; each memory output
+  (<name>_out) goes back as the input <name> of the next step. road_type is the class once ROAD_TYPE_DEBOUNCE steps in a
+  row agree, None before. The junction output is not used: it is not good enough yet."""
+  def __init__(self, network, classes: list[str], width: int, height: int):
+    self.network = network
+    self.classes = classes
+    self.image = RoadTypeInput(width, height)
+    self.memory: dict[str, np.ndarray] = {}
+    self.answers: list[str] = []
+    self.road_type: str | None = None
+    self.last_step = -math.inf
+
+  def due(self, now: float) -> bool:
+    return now - self.last_step >= ROAD_TYPE_PERIOD
+
+  def step(self, now: float, y: np.ndarray, uv: np.ndarray, v_ego: float | None, sign_age: float,
+           motion: np.ndarray) -> str | None:
+    if now - self.last_step > ROAD_TYPE_RESET_SECONDS:
+      self.memory, self.answers, self.road_type = {}, [], None
+    self.last_step = now
+    speed = [[min(max(v_ego, 0.0), 60.0) / 30.0, 1.0]] if v_ego is not None else [[0.0, 0.0]]
+    sign = [[min(sign_age, SIGN_AGE_MAX) / 60.0, 1.0]] if sign_age <= SIGN_AGE_MAX else [[2.0, 0.0]]
+    inputs = {"image": self.image(y, uv), "speed": np.array(speed, dtype=np.float32),
+              "sign": np.array(sign, dtype=np.float32), "motion": motion}
+    names = self.network.input_names
+    for name in names:
+      if name not in inputs:  # a memory: zeros at the start
+        inputs[name] = self.memory.get(name, np.zeros(self.network.input_shape(name), dtype=np.float32))
+    outputs = self.network(**{name: value for name, value in inputs.items() if name in names})
+    self.memory = {name[:-len("_out")]: value for name, value in outputs.items() if name.endswith("_out")}
+    self.answers = (self.answers + [self.classes[int(np.argmax(outputs["probabilities"]))]])[-ROAD_TYPE_DEBOUNCE:]
+    if len(self.answers) == ROAD_TYPE_DEBOUNCE and len(set(self.answers)) == 1:
+      self.road_type = self.answers[0]
+    return self.road_type
+
+
 def signnet_boxes(output: np.ndarray, scale: float, limit: int = MAX_BOXES, min_score: float = MIN_BOX_SCORE) -> list[dict]:
   """SignNet's boxes (frame pixels, the best first): the local maxima (3 x 3) of the heat map of its output
   (1, 5, H, W: heat, log width, log height, offset x, offset y) of at least min_score, at most limit."""
@@ -340,12 +450,16 @@ class SpeedLimitMemory:
   """The limit shown (km/h, 0: none). A number becomes the limit when it is read in CONFIRM_FRAMES frames within
   CONFIRM_SECONDS, and stays until another one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
   sets the general limit of that road (IMPLICIT_LIMITS of the country; where ROAD_SIGN_KEEPS_LIMIT, only when no limit
-  is held); so does the end of a limit, on a road whose kind is known (else 0, no limit). The camera only: the map is
-  another source, which the speed-limit resolver weighs against this one.
+  is held); so does the end of a limit, on a road whose kind is known (else 0, no limit). The camera and the car only:
+  the map is another source, which the speed-limit resolver weighs against this one.
 
   The limit of a ramp ends on the main carriageway, where no sign ends it: a number read on a ramp or within
   RAMP_SECONDS of a motorway or expressway sign is taken as the ramp's, and once the road-type network sees the
-  carriageway the general limit of the road comes back."""
+  carriageway the general limit of the road comes back.
+
+  Where no sign gives the limit, the scene does (the road-type network): a car park gives PARKING_LIMIT (a sign there
+  only when lower) and drops the limit of the road before; leaving it, or with nothing held (the start of a drive), the
+  road type seen gives its general limit (a town: 50), which follows another road type only after ROAD_TYPE_SECONDS."""
   def __init__(self, country: str = DEFAULT_COUNTRY):
     self.speed_limit = 0.0
     self.country = country if country in IMPLICIT_LIMITS else DEFAULT_COUNTRY
@@ -355,6 +469,11 @@ class SpeedLimitMemory:
     self._ramp_limit = False  # the limit held is a ramp's
     self._merge_since: float | None = None
     self.sign_read = False  # a number or a road sign was confirmed in the last update (the limit held again too)
+    # What gives the limit held: "sign", "road" (the road type seen), "parking", None (no limit).
+    self.source: str | None = None
+    self._road_type: str | None = None  # the road type of the last update, since _road_type_since
+    self._road_type_since = -math.inf
+    self._parking_since: float | None = None  # in a car park below PARKING_MAX_SPEED since
 
   def _confirmed(self, now: float, values: list) -> list:
     self._seen = [(t, value) for t, value in self._seen if now - t <= CONFIRM_SECONDS]
@@ -371,34 +490,65 @@ class SpeedLimitMemory:
     limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
     return float(limit or 0)
 
+  def road_sign_age(self, now: float) -> float:
+    """Seconds since a motorway or expressway sign was confirmed (inf before the first): the road-type network's input."""
+    return now - self._road_sign_at
+
+  def _set(self, limit: float, source: str | None) -> None:
+    self.speed_limit = limit
+    self.source = source if limit > 0 else None
+
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
-             road_type: str | None = None) -> float:
+             road_type: str | None = None, v_ego: float | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
-    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it."""
+    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it;
+    v_ego: the car's speed (m/s), None when unknown (then no car park)."""
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
     numbers = [value for value in confirmed if isinstance(value, float)]
     road_signs = [value for value in confirmed if isinstance(value, str)]
     self.sign_read = bool(confirmed)
+    if road_type != self._road_type:
+      self._road_type, self._road_type_since = road_type, now
+    slow = v_ego is not None and v_ego < PARKING_MAX_SPEED
+    if road_type != "parking" or not slow:
+      self._parking_since = None
+    elif self._parking_since is None:
+      self._parking_since = now
+    parking = self._parking_since is not None and now - self._parking_since >= PARKING_SECONDS
+
+    if parking or self.source == "parking" and road_type not in ROAD_KINDS:
+      # In a car park: its limit, a sign only when lower; the road before is dropped.
+      if self.source != "parking" or numbers and 0 < numbers[0] < self.speed_limit:
+        self._set(numbers[0] if numbers and 0 < numbers[0] < PARKING_LIMIT else PARKING_LIMIT, "parking")
+        self.road, self._ramp_limit, self._merge_since = None, False, None
+      return self.speed_limit
 
     if road_signs:
       self.road = road_signs[0]
       if self.country not in ROAD_SIGN_KEEPS_LIMIT or self.speed_limit <= 0:
-        self.speed_limit = self._general(self.road)
+        self._set(self._general(self.road), "sign")
       self._ramp_limit = False
       if self.road in ("motorway", "expressway"):
         self._road_sign_at = now
-    if road_type in ("town", "rural", "expressway", "motorway") and not road_signs:
+    if road_type in ROAD_KINDS and not road_signs:
       self.road = road_type
     if numbers:
       value = numbers[0]
       if value == 0:
-        self.speed_limit = self._general(self.road)
+        self._set(self._general(self.road), "sign")
         self._ramp_limit = False
       else:
-        self.speed_limit = value
+        self._set(value, "sign")
         self._ramp_limit = road_type == "ramp" or now - self._road_sign_at <= RAMP_SECONDS
       self._merge_since = None
+      return self.speed_limit
+
+    # The scene where no sign gives the limit: out of a car park or with nothing held, the road type's general limit
+    # (also where it has none: the motorway in Germany, 0); a limit of the scene follows a new road type held long enough.
+    if road_type in ROAD_KINDS and not self._ramp_limit and not road_signs and (
+        self.source in (None, "parking") or self.source == "road" and now - self._road_type_since >= ROAD_TYPE_SECONDS):
+      self._set(self._general(road_type), "road")
       return self.speed_limit
 
     if self._ramp_limit:
@@ -409,7 +559,7 @@ class SpeedLimitMemory:
         self._merge_since = now
       elif now - self._merge_since >= MERGE_SECONDS:
         self.road = road_type
-        self.speed_limit = self._general(road_type)
+        self._set(self._general(road_type), "sign")  # the road's own limit after the ramp's sign: until the next sign
         self._ramp_limit = False
         self._merge_since = None
     return self.speed_limit

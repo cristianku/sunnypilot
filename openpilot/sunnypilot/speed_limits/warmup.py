@@ -21,7 +21,7 @@ def main() -> None:
   failed = set()
   while True:
     files = runner.networks()
-    for onnx in (files.finder, files.classifier) if files else ():
+    for onnx in files.onnx() if files else ():
       attempt = (onnx, onnx.stat().st_mtime_ns)
       if attempt in failed or runner.compiled_path(onnx).is_file():
         continue

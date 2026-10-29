@@ -235,3 +235,105 @@ def test_memory_a_road_sign_keeps_the_limit_in_sweden():
   assert confirm(memory, 5.0, [90]) == 90
   assert confirm(memory, 10.0, signs=["other_sign:motorway_end"]) == 90  # the 90 holds until its end sign
   assert memory.road == "rural"
+
+
+def drive(memory, start, end, readings=(), signs=(), **context):
+  """Updates five times a second from start to end (excluded), as speedvisiond; the limit at the last one."""
+  for step in range(round((end - start) * 5)):
+    memory.update(start + step * 0.2, list(readings), list(signs), **context)
+  return memory.speed_limit
+
+
+def test_memory_out_of_a_car_park_into_a_town():
+  memory = vision.SpeedLimitMemory()
+  assert drive(memory, 0.0, 4.0, road_type="parking", v_ego=2.0) == 0  # not long enough yet
+  assert drive(memory, 4.0, 6.0, road_type="parking", v_ego=2.0) == vision.PARKING_LIMIT and memory.source == "parking"
+  assert drive(memory, 6.0, 9.0, road_type="ramp", v_ego=4.0) == vision.PARKING_LIMIT  # not a road with a limit
+  assert drive(memory, 9.0, 10.0, road_type="town", v_ego=6.0) == 50 and memory.source == "road"  # the street
+  assert confirm(memory, 20.0, [30], road_type="town") == 30 and memory.source == "sign"
+  assert drive(memory, 21.0, 40.0, road_type="rural", v_ego=15.0) == 30  # a sign holds whatever the scene
+
+
+def test_memory_the_scene_gives_the_limit_only_without_a_sign():
+  memory = vision.SpeedLimitMemory()
+  assert memory.update(0.0, [], road_type="town") == 50  # the start of a drive in a town
+  assert drive(memory, 0.2, 9.0, road_type="rural") == 50  # another road type: not long enough
+  assert drive(memory, 9.0, 11.0, road_type="rural") == 80
+  assert drive(memory, 11.0, 15.0, road_type=None) == 80  # no answer: it holds
+  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, road_type="motorway") == 0  # no general limit there
+  assert vision.SpeedLimitMemory().update(0.0, [], road_type="ramp") == 0
+
+
+def test_memory_a_car_park_needs_a_slow_car_and_drops_the_road_before():
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, [80]) == 80
+  assert drive(memory, 1.0, 20.0, road_type="parking", v_ego=20.0) == 80  # too fast for a car park
+  assert drive(memory, 20.0, 24.0, road_type="parking") == 80  # the speed unknown
+  assert drive(memory, 24.0, 30.0, road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT
+  assert confirm(memory, 40.0, [30], road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT  # higher: not taken
+  assert confirm(memory, 45.0, [10], road_type="parking", v_ego=3.0) == 10  # lower: taken
+  assert drive(memory, 50.0, 51.0, road_type="rural", v_ego=8.0) == 80
+
+
+def test_car_motion_features():
+  motion = vision.CarMotion()
+  assert motion.features(0.0).tolist() == [[0.0] * 8]  # nothing known
+  for i in range(20):
+    t = 10.0 + i * 0.05
+    motion.add_device_motion(t, -np.radians(15.0), True)  # z down: a left turn of 15 deg/s
+    motion.add_car_state(t, 90.0, i == 0, False, 0.0)
+  features = motion.features(11.0)
+  assert np.allclose(features, [[0.5, 0.5, 1, 0.5, 1, 1, 0, 1]])
+  assert motion.features(12.5).tolist() == [[0.0] * 8]  # too old: unknown again
+  later = vision.CarMotion()
+  for i in range(20):
+    later.add_device_motion(i * 0.05, 0.3, False)  # not valid: the car's own yaw rate
+    later.add_car_state(i * 0.05, -360.0, False, True, np.radians(-90.0))
+  assert np.allclose(later.features(1.0), [[-3, 3, 1, -2, 1, 0, 1, 1]])
+
+
+class FakeRoadType:
+  """The road-type network's inputs and outputs: the class asked in turn, its memory counting the steps."""
+  input_names = ("image", "speed", "sign", "motion", "hidden")
+
+  def __init__(self, answers):
+    self.answers = iter(answers)
+    self.calls = []
+
+  @staticmethod
+  def input_shape(name):
+    return (1, 4)
+
+  def __call__(self, **inputs):
+    self.calls.append(inputs)
+    probabilities = np.zeros((1, 6), dtype=np.float32)
+    probabilities[0, ["town", "rural", "expressway", "motorway", "ramp", "parking"].index(next(self.answers))] = 1
+    return {"probabilities": probabilities, "hidden_out": inputs["hidden"] + 1, "junction": np.zeros((1, 2))}
+
+
+def test_road_type_reader_debounces_and_carries_its_memory():
+  height, width = 760, 1344
+  y, uv = nv12(np.full((height, width), 235), np.full((height // 2, width // 2), 128), np.full((height // 2, width // 2), 128))
+  network = FakeRoadType(["parking", "parking", "town", "town", "town", "rural", "town"])
+  reader = vision.RoadTypeReader(network, ["town", "rural", "expressway", "motorway", "ramp", "parking"], width, height)
+  motion = np.zeros((1, 8), dtype=np.float32)
+  answers = [reader.step(float(t), y, uv, 10.0, 30.0, motion) for t in range(5)]
+  assert answers == [None, None, None, None, "town"]  # the same class three steps in a row
+  assert reader.step(5.0, y, uv, None, 500.0, motion) == "town"  # one other answer: still town
+  first, last = network.calls[0], network.calls[-1]
+  assert first["image"].shape == (1, 3, 144, 256) and np.all(first["image"] == 1.0)
+  assert np.allclose(first["speed"], [[1 / 3, 1]]) and np.allclose(first["sign"], [[0.5, 1]])
+  assert np.allclose(last["speed"], [[0, 0]]) and np.allclose(last["sign"], [[2, 0]])
+  assert np.all(first["hidden"] == 0) and np.all(last["hidden"] == 5)  # its memory, step after step
+  assert reader.step(20.0, y, uv, 10.0, 30.0, motion) is None  # a long pause: from zeros again
+  assert np.all(network.calls[-1]["hidden"] == 0)
+
+
+def test_road_type_input_is_the_resized_frame():
+  rng = np.random.default_rng(0)
+  height, width = 76, 134
+  y, uv = nv12(rng.integers(16, 236, (height, width)), rng.integers(16, 241, (height // 2, width // 2)),
+               rng.integers(16, 241, (height // 2, width // 2)))
+  expected = vision.resize(vision.yuv_to_rgb(y, uv, 0, height, 0, width), vision.ROAD_TYPE_WIDTH, vision.ROAD_TYPE_HEIGHT)
+  assert np.array_equal(vision.RoadTypeInput(width, height)(y, uv)[0], expected.astype(np.float32) / 255.0)
+

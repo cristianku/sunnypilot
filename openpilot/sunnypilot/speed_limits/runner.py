@@ -38,13 +38,23 @@ STALE_PARTIAL_SECONDS = 3600
 
 
 class Networks:
-  """The files of the networks: SignNet (finder), the classifier and its classes, the name of the release."""
+  """The files of the networks: SignNet (finder), the classifier and its classes, the name of the release; the road
+  type network and its classes when the release has one (road_type, optional in format 2)."""
   def __init__(self, manifest: dict):
     self.name = f"speed-limits {manifest['version']}"
     self.finder = MODELS_DIR / manifest["finder"]["file"]
     self.classifier = MODELS_DIR / manifest["classifier"]["file"]
     contract = json.loads((MODELS_DIR / manifest["classifier"]["contract"]).read_text())
     self.classes: list[str] = contract["output"]["classes"]
+    self.road_type: Path | None = None
+    self.road_types: list[str] = []
+    if "road_type" in manifest:
+      self.road_type = MODELS_DIR / manifest["road_type"]["file"]
+      self.road_types = json.loads((MODELS_DIR / manifest["road_type"]["contract"]).read_text())["output"]["classes"]
+
+  def onnx(self) -> list[Path]:
+    """Every network of the release, the road type's too."""
+    return [self.finder, self.classifier] + ([self.road_type] if self.road_type else [])
 
 
 def networks() -> Networks | None:
@@ -110,3 +120,31 @@ class Network:
     self.input._buffer().copy_from(self.host_buffer)
     self.run(output_buffers=self.outputs, **{self.input_name: self.input})
     return self.outputs[self.output_name].numpy().astype(np.float32)
+
+
+class StepNetwork:
+  """A compiled network with several named inputs and outputs (the road type: the frame, the car's speed and motion,
+  its memory): numpy in by name, numpy (float32) out by name."""
+  def __init__(self, path: Path):
+    from tinygrad.tensor import Tensor
+    from openpilot.selfdrive.modeld.helpers import load_oob
+
+    jits = load_oob(path)
+    self.run = jits["run"]
+    specs = jits["input_specs"].items()
+    self.hosts = {name: np.zeros(shape, dtype=dtype) for name, (shape, dtype, _) in specs}
+    self.input_names = tuple(self.hosts)
+    self.host_buffers = {name: Tensor(host, device="NPY")._buffer() for name, host in self.hosts.items()}
+    self.inputs = {name: Tensor(np.zeros(shape, dtype=dtype), device=device).realize() for name, (shape, dtype, device) in specs}
+    self.outputs = {name: Tensor(np.zeros(shape, dtype=dtype), device=device).realize()
+                    for name, (shape, dtype, device) in jits["output_specs"].items()}
+
+  def input_shape(self, name: str) -> tuple[int, ...]:
+    return self.hosts[name].shape
+
+  def __call__(self, **inputs: np.ndarray) -> dict[str, np.ndarray]:
+    for name, value in inputs.items():
+      self.hosts[name][...] = value
+      self.inputs[name]._buffer().copy_from(self.host_buffers[name])
+    self.run(output_buffers=self.outputs, **self.inputs)
+    return {name: output.numpy().astype(np.float32) for name, output in self.outputs.items()}
