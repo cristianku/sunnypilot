@@ -4,6 +4,9 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
+VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE OR IN SPEEDVISIOND READS THE MAP (liveMapDataSP). THE VISION LIMIT
+COMES FROM THE CAMERA AND THE CAR'S OWN SIGNALS ONLY; SUNNYPILOT'S RESOLVER ("MAP DATA + VISION") WEIGHS THE TWO.
+
 The speed-limits networks' inputs and outputs, in numpy: the road camera's NV12 frame to SignNet's band and the
 classifier's crops, SignNet's boxes, the classifier's class to a speed, and the memory that turns the readings of
 single frames into the limit shown. The networks were trained on frames that ffmpeg decoded to RGB (swscale's BT.601
