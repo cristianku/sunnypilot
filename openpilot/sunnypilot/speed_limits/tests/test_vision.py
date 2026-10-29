@@ -250,3 +250,18 @@ def test_memory_germany_has_no_general_motorway_limit():
   for t in range(7, 16):
     memory.update(float(t), [], road_type="motorway")
   assert memory.speed_limit == 0  # no limit
+
+
+def test_memory_general_limits_by_country():
+  assert confirm(vision.SpeedLimitMemory("LI"), 0.0, signs=["other_sign:motorway_start"]) == 80
+  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, signs=["other_sign:expressway_start"]) == 100
+  assert confirm(vision.SpeedLimitMemory("PL"), 0.0, signs=["other_sign:motorway_start"]) == 140
+  assert vision.SpeedLimitMemory("GB").country == vision.DEFAULT_COUNTRY  # mph: not handled
+
+
+def test_memory_a_road_sign_keeps_the_limit_in_sweden():
+  memory = vision.SpeedLimitMemory("SE")
+  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == 110  # nothing held: the motorway's limit
+  assert confirm(memory, 5.0, [90]) == 90
+  assert confirm(memory, 10.0, signs=["other_sign:motorway_end"]) == 90  # the 90 holds until its end sign
+  assert memory.road == "rural"

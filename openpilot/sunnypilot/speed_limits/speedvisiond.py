@@ -22,6 +22,7 @@ from msgq.visionipc import VisionIpcClient
 from openpilot.cereal import messaging
 from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot.speed_limits import runner, vision
 
@@ -64,7 +65,8 @@ def main() -> None:
   maps = messaging.SubMaster(["liveMapDataSP"])  # apart from sm, whose update waits for the driving model
   pm = messaging.PubMaster(["speedVisionSP"])
   signnet_input = vision.SignNetInput(client.width, client.height)
-  memory = vision.SpeedLimitMemory()
+  # The country of the general limits: the one chosen for the maps (Settings › OSM, an ISO code), else Switzerland.
+  memory = vision.SpeedLimitMemory(Params().get("OsmLocationName") or vision.DEFAULT_COUNTRY)
   next_frame = 0.0
   while True:
     buf = client.recv()

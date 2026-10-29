@@ -35,15 +35,37 @@ SPEED_KINDS = ("maximum_speed", "variable_display", "zone", "road_marking")
 CANCELLATION = "cancellation"
 
 # The general limits that hold where no number is signed (km/h; None: no general limit), by country, for the kind of
-# road: in a town, outside towns, on an expressway (Autostrasse), on a motorway.
+# road: in a town, outside towns, on an expressway (Autostrasse), on a motorway. From the laws of each country,
+# sunnypilot.speedlimits docs/road-rules/<cc>.md (29 Oct 2026). Where a kind's limit depends on what the camera cannot
+# tell (a single or a dual carriageway, the region), the lower one. GB is left out: its signs are in mph.
 IMPLICIT_LIMITS = {
   "CH": {"town": 50, "rural": 80, "expressway": 100, "motorway": 120},
+  "LI": {"town": 50, "rural": 80, "expressway": 80, "motorway": 80},
+  "DE": {"town": 50, "rural": 100, "expressway": 100, "motorway": None},
   "AT": {"town": 50, "rural": 100, "expressway": 100, "motorway": 130},
   "IT": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
   "FR": {"town": 50, "rural": 80, "expressway": 110, "motorway": 130},
-  "DE": {"town": 50, "rural": 100, "expressway": None, "motorway": None},
+  "NL": {"town": 50, "rural": 80, "expressway": 100, "motorway": 130},
+  "BE": {"town": 50, "rural": 70, "expressway": 70, "motorway": 120},  # Flanders; Brussels 30 in town, Wallonia 90
+  "LU": {"town": 50, "rural": 90, "expressway": 90, "motorway": 130},
+  "ES": {"town": 50, "rural": 90, "expressway": 90, "motorway": 120},
+  "PT": {"town": 50, "rural": 90, "expressway": 100, "motorway": 120},
+  "IE": {"town": 50, "rural": 80, "expressway": 100, "motorway": 120},
+  "DK": {"town": 50, "rural": 80, "expressway": 80, "motorway": 130},
+  "SE": {"town": 50, "rural": 70, "expressway": 70, "motorway": 110},
+  "NO": {"town": 50, "rural": 80, "expressway": 80, "motorway": 80},
+  "FI": {"town": 50, "rural": 80, "expressway": 80, "motorway": 80},
+  "PL": {"town": 50, "rural": 90, "expressway": 100, "motorway": 140},  # an expressway of two carriageways is 120
+  "CZ": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
+  "SK": {"town": 50, "rural": 90, "expressway": 90, "motorway": 130},
+  "HU": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
+  "SI": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
+  "HR": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
 }
 DEFAULT_COUNTRY = "CH"
+# Where a sign of the kind of road does not end the limit held (it holds until its end sign or the next number): it
+# only says which road the car is on.
+ROAD_SIGN_KEEPS_LIMIT = ("SE", "NO", "FI")
 # The signs that say which kind of road begins: their general limit replaces the limit held.
 ROAD_SIGNS = {
   "other_sign:motorway_start": "motorway",
@@ -318,7 +340,8 @@ def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finde
 class SpeedLimitMemory:
   """The limit shown (km/h, 0: none). A number becomes the limit when it is read in CONFIRM_FRAMES frames within
   CONFIRM_SECONDS, and stays until another one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
-  sets the general limit of that road (IMPLICIT_LIMITS of the country); so does the end of a limit, on a road whose
+  sets the general limit of that road (IMPLICIT_LIMITS of the country; where ROAD_SIGN_KEEPS_LIMIT, only when no limit
+  is held); so does the end of a limit, on a road whose
   kind is known (else 0, no limit). When the map's limit changes (another road), the map's new limit replaces it.
 
   The limit of a ramp ends on the main carriageway, where no sign ends it: a number read on a ramp or within
@@ -388,7 +411,8 @@ class SpeedLimitMemory:
 
     if road_signs:
       self.road = road_signs[0]
-      self.speed_limit = self._general(self.road)
+      if self.country not in ROAD_SIGN_KEEPS_LIMIT or self.speed_limit <= 0:
+        self.speed_limit = self._general(self.road)
       self._ramp_limit = False
       if self.road in ("motorway", "expressway"):
         self._road_sign_at = now
