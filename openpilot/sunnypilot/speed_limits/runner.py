@@ -5,8 +5,9 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
 The speed-limits networks of the models repository (models/speed_limits.json), compiled for the device's GPU with
-tinygrad and run. They are compiled on the device the first time, not in the build: a network that fails to compile
-leaves speedvisiond without a reading, never the build or openpilot without its driving model.
+tinygrad and run. They are compiled on the device by the build at boot (SConscript), the warmup offroad and
+speedvisiond when they are still missing; never failing the build: a network that fails to compile leaves speedvisiond
+without a reading, never the build or openpilot without its driving model.
 """
 import hashlib
 import json

@@ -5,8 +5,8 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-Compiles the speed-limits networks offroad, so that speedvisiond reads from the start of the drive. It runs when
-speedvisiond would; once the networks are compiled it only waits.
+Compiles offroad the speed-limits networks the build at boot did not (SConscript), so that speedvisiond reads from the
+start of the drive. It runs when speedvisiond would; once the networks are compiled it only waits.
 """
 import os
 os.environ['GMMU'] = '0'
