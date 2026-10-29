@@ -112,6 +112,7 @@ struct SelfdriveStateSP @0x81c2f05a394cf4af {
 
     promptSingleLow @31;
     promptSingleHigh @32;
+    promptDoubleHigh @33;  # promptSingleHigh twice: played by soundd alone when the vision network reads a sign
   }
 }
 
