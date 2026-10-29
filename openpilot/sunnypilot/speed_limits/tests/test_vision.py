@@ -235,7 +235,7 @@ def test_memory_a_wrong_branch_sign_ends_with_the_road():
 
 def test_memory_without_a_limit_leaves_the_map_alone():
   memory = vision.SpeedLimitMemory()
-  for t in range(0, 10):
+  for t in range(10):
     assert memory.update(float(t), [], map_limit=50 if t < 5 else 80) == 0  # nothing read: the map is used as it is
   assert confirm(memory, 20.0, [60], map_limit=80) == 60
   for t in range(22, 26):
