@@ -271,7 +271,7 @@ def test_memory_a_car_park_needs_a_slow_car_and_drops_the_road_before():
   assert drive(memory, 20.0, 24.0, road_type="parking") == 80  # the speed unknown
   assert drive(memory, 24.0, 30.0, road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT
   assert confirm(memory, 40.0, [30], road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT  # higher: not taken
-  assert confirm(memory, 45.0, [10], road_type="parking", v_ego=3.0) == 10  # lower: taken
+  assert confirm(memory, 45.0, [5], road_type="parking", v_ego=3.0) == 5  # lower: taken
   assert drive(memory, 50.0, 51.0, road_type="rural", v_ego=8.0) == 80
 
 

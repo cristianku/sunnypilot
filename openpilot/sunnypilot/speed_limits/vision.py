@@ -102,7 +102,7 @@ MOTION_MIN_SAMPLES = 10
 # PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before; out of it, or where nothing is
 # held, the road type seen gives its general limit (town: 50). Such a limit follows another road type only after
 # ROAD_TYPE_SECONDS of it; a sign always wins.
-PARKING_LIMIT = 15.0
+PARKING_LIMIT = 10.0
 PARKING_SECONDS = 5.0
 PARKING_MAX_SPEED = 25 / 3.6
 ROAD_TYPE_SECONDS = 10.0
