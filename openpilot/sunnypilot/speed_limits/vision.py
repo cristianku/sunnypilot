@@ -350,7 +350,7 @@ class SpeedLimitMemory:
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (), road_type: str | None = None,
              speed_kph: float | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
-    road_type: what the road-type network sees (town, rural, expressway, motorway, motorway_ramp...), None without it;
+    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it;
     speed_kph: the car's speed, None when unknown."""
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
@@ -373,7 +373,7 @@ class SpeedLimitMemory:
         self._ramp_limit = False
       else:
         self.speed_limit = value
-        on_ramp = road_type is not None and road_type.endswith("_ramp")
+        on_ramp = road_type == "ramp"
         self._ramp_limit = on_ramp or (now - self._road_sign_at <= RAMP_SECONDS and road_type is None)
       self._merge_since = None
       return self.speed_limit

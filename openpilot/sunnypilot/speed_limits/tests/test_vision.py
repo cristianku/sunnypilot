@@ -186,8 +186,8 @@ def test_memory_ramp_limit_ends_on_the_motorway_by_speed():
 def test_memory_ramp_limit_ends_by_the_road_type_network():
   memory = vision.SpeedLimitMemory()
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 100.0, [60], road_type="motorway_ramp") == 60  # far from the sign, the network says ramp
-  assert memory.update(101.0, [], road_type="motorway_ramp", speed_kph=120.0) == 60  # the network wins over speed
+  assert confirm(memory, 100.0, [60], road_type="ramp") == 60  # far from the sign, the network says ramp
+  assert memory.update(101.0, [], road_type="ramp", speed_kph=120.0) == 60  # the network wins over speed
   for t in range(102, 110):
     memory.update(float(t), [], road_type="motorway")
   assert memory.update(110.0, [], road_type="motorway") == 120
