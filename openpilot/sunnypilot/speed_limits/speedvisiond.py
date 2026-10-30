@@ -11,9 +11,9 @@ and a reading becomes the limit when two frames agree; it stays until another si
 motorway, a town, their ends) gives the road's general limit, and the limit of a motorway ramp ends once the car is
 on the carriageway (vision.SpeedLimitMemory). Once a second the road-type network, when the release has one, sees the
 whole frame with the car's speed, steering, blinkers and yaw (carState, deviceMotion): where no sign gives the limit
-the scene does (a car park 10, out of it the street's general limit, a town 50). IT NEVER READS THE MAP: MAP AND
-VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed Limit is on or Speed
-Limit Source is Map Data + Vision.
+the scene does (a garage 10, a car park in the open 20, out of it the street's general limit, a town 50). IT NEVER
+READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
+Limit is on or Speed Limit Source is Map Data + Vision.
 """
 import os
 os.environ['GMMU'] = '0'
@@ -83,6 +83,7 @@ def main() -> None:
   signnet_input = vision.SignNetInput(client.width, client.height)
   # The country of the general limits: the one chosen for the maps (Settings › OSM, an ISO code), else Switzerland.
   memory = vision.SpeedLimitMemory(Params().get("OsmLocationName") or vision.DEFAULT_COUNTRY)
+  memory.garage_known = road_types is not None and "garage" in road_types.classes
   motion = vision.CarMotion()
   v_ego: float | None = None
   next_frame = 0.0

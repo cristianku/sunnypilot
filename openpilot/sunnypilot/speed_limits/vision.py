@@ -105,12 +105,16 @@ SIGN_AGE_MAX = 120.0
 MOTION_SECONDS = 1.0
 BLINKER_SECONDS = 2.0
 MOTION_MIN_SAMPLES = 10
-# Where no sign gives the limit the scene does: a car park gives PARKING_LIMIT once the network has seen it for
-# PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before; out of it (a road type with a
-# general limit seen for ROAD_TYPE_SECONDS: a moment of a street inside a car park keeps it), or where nothing is
-# held, the road type seen gives its general limit (town: 50). Such a limit follows another road type only after
-# ROAD_TYPE_SECONDS of it; a sign always wins.
-PARKING_LIMIT = 10.0
+# Where no sign gives the limit the scene does: a car park (CAR_PARKS) gives its limit once the network has seen it for
+# PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before: GARAGE_LIMIT underground or
+# indoors (garage), PARKING_LIMIT in the open (parking). A network trained before the class garage says parking for
+# both: then GARAGE_LIMIT (SpeedLimitMemory.garage_known). Out of it (a road type with a general limit seen for
+# ROAD_TYPE_SECONDS: a moment of a street inside a car park keeps it), or where nothing is held, the road type seen
+# gives its general limit (town: 50). Such a limit follows another road type only after ROAD_TYPE_SECONDS of it; a sign
+# always wins.
+CAR_PARKS = ("parking", "garage")
+GARAGE_LIMIT = 10.0
+PARKING_LIMIT = 20.0
 PARKING_SECONDS = 5.0
 PARKING_MAX_SPEED = 25 / 3.6
 ROAD_TYPE_SECONDS = 10.0
@@ -126,6 +130,7 @@ SETTINGS = {
   "zone_confidence": ("ZONE_CONFIDENCE", 0.5, 0.999),
   "parking_seconds": ("PARKING_SECONDS", 1.0, 30.0),
   "parking_limit": ("PARKING_LIMIT", 5.0, 30.0),
+  "garage_limit": ("GARAGE_LIMIT", 5.0, 30.0),
   "ramp_seconds": ("RAMP_SECONDS", 5.0, 120.0),
   "merge_seconds": ("MERGE_SECONDS", 2.0, 30.0),
 }
@@ -501,8 +506,9 @@ class SpeedLimitMemory:
   RAMP_SECONDS of a motorway or expressway sign is taken as the ramp's, and once the road-type network sees the
   carriageway the general limit of the road comes back.
 
-  Where no sign gives the limit, the scene does (the road-type network): a car park gives PARKING_LIMIT (a sign there
-  only when lower) and drops the limit of the road before; leaving it (a road seen for ROAD_TYPE_SECONDS), or with
+  Where no sign gives the limit, the scene does (the road-type network): a car park gives its limit (GARAGE_LIMIT
+  underground or indoors, PARKING_LIMIT in the open; another kind seen for PARKING_SECONDS inside, its limit; a sign
+  there only when lower) and drops the limit of the road before; leaving it (a road seen for ROAD_TYPE_SECONDS), or with
   nothing held (the start of a drive), the road type seen gives its general limit (a town: 50), which follows another
   road type only after ROAD_TYPE_SECONDS."""
   def __init__(self, country: str = DEFAULT_COUNTRY):
@@ -518,7 +524,12 @@ class SpeedLimitMemory:
     self.source: str | None = None
     self._road_type: str | None = None  # the road type of the last update, since _road_type_since
     self._road_type_since = -math.inf
-    self._parking_since: float | None = None  # in a car park below PARKING_MAX_SPEED since
+    self._park: str | None = None  # the kind of car park seen below PARKING_MAX_SPEED, since _parking_since
+    self._parking_since: float | None = None
+    self._held_park: str | None = None  # the kind of car park whose limit is held
+    # The road-type network tells a garage from a car park in the open (it has the class garage): else its parking
+    # may be either and gives GARAGE_LIMIT. speedvisiond sets it from the network's classes.
+    self.garage_known = False
     self._sign_at = -math.inf  # when a number or a road sign was last confirmed
 
   def _confirmed(self, now: float, values: list) -> list:
@@ -538,6 +549,9 @@ class SpeedLimitMemory:
     limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
     return float(limit or 0)
 
+  def _park_limit(self, park: str | None) -> float:
+    return PARKING_LIMIT if park == "parking" and self.garage_known else GARAGE_LIMIT
+
   def road_sign_age(self, now: float) -> float:
     """Seconds since a motorway or expressway sign was confirmed (inf before the first): the road-type network's input."""
     return now - self._road_sign_at
@@ -549,8 +563,8 @@ class SpeedLimitMemory:
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
              road_type: str | None = None, v_ego: float | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
-    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking, zone30), None
-    without it;
+    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking, zone30, garage),
+    None without it;
     v_ego: the car's speed (m/s), None when unknown (then no car park)."""
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
@@ -562,18 +576,21 @@ class SpeedLimitMemory:
     if road_type != self._road_type:
       self._road_type, self._road_type_since = road_type, now
     slow = v_ego is not None and v_ego < PARKING_MAX_SPEED
-    if road_type != "parking" or not slow:
-      self._parking_since = None
-    elif self._parking_since is None:
-      self._parking_since = now
-    parking = self._parking_since is not None and now - self._parking_since >= PARKING_SECONDS
+    park = road_type if road_type in CAR_PARKS and slow else None
+    if park != self._park:
+      self._park, self._parking_since = park, now if park else None
+    parking = park is not None and now - self._parking_since >= PARKING_SECONDS
 
     left = road_type in ROAD_KINDS and now - self._road_type_since >= ROAD_TYPE_SECONDS
     if parking or self.source == "parking" and not left:
-      # In a car park: its limit, a sign only when lower; the road before is dropped.
-      if self.source != "parking" or numbers and 0 < numbers[0] < self.speed_limit:
-        self._set(numbers[0] if numbers and 0 < numbers[0] < PARKING_LIMIT else PARKING_LIMIT, "parking")
+      # In a car park: its limit (another kind seen long enough inside: its limit), a sign only when lower; the road
+      # before is dropped.
+      if parking and (self.source != "parking" or self._park_limit(park) != self._park_limit(self._held_park)):
+        self._held_park = park
+        self._set(self._park_limit(park), "parking")
         self.road, self._ramp_limit, self._merge_since = None, False, None
+      if numbers and 0 < numbers[0] < self.speed_limit:
+        self._set(numbers[0], "parking")
       return self.speed_limit
 
     if road_signs:
