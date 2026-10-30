@@ -91,7 +91,14 @@ ROAD_TYPE_HEIGHT = 144
 ROAD_TYPE_PERIOD = 1.0
 ROAD_TYPE_DEBOUNCE = 3
 ROAD_TYPE_RESET_SECONDS = 5.0  # longer without a step: its memory starts again from zeros
-ROAD_KINDS = ("town", "rural", "expressway", "motorway")  # the road types with a general limit
+ROAD_KINDS = ("town", "rural", "expressway", "motorway", "zone30")  # the road types with a general limit
+# A 30 zone (the road-type network's zone30, from its next training): 30 in every country. Seen for ROAD_TYPE_SECONDS
+# after the last sign, it also lowers a town's general limit held from a sign (its gate sign missed, a 50 read on the
+# street before): the car must not speed up to 50 inside it. A higher number (60, 80) holds: the network can be wrong.
+ZONE_LIMIT = 30.0
+# zone30 is said only this sure (its probability), else town: with Map Data + Vision the resolver takes vision first,
+# and a wrong 30 on a 50 street is worse than a zone missed. 0.9 for the first network with the class; 0.99 the aim.
+ZONE_CONFIDENCE = 0.9
 SIGN_AGE_MAX = 120.0
 # The car's motion input (car_motion.motion_features of the training): the samples of the last second, the blinkers of
 # the last two; fewer than MOTION_MIN_SAMPLES in the second and that part is unknown.
@@ -330,7 +337,8 @@ class RoadTypeReader:
   """The road-type network step by step (one step every ROAD_TYPE_PERIOD): the frame, the speed, how long ago a
   motorway or expressway sign was confirmed and the car's motion in, the probabilities out; each memory output
   (<name>_out) goes back as the input <name> of the next step. road_type is the class once ROAD_TYPE_DEBOUNCE steps in a
-  row agree, None before. The junction output is not used: it is not good enough yet."""
+  row agree, None before; zone30 only at ZONE_CONFIDENCE, else town. The junction output is not used: it is not good
+  enough yet."""
   def __init__(self, network, classes: list[str], width: int, height: int):
     self.network = network
     self.classes = classes
@@ -358,7 +366,12 @@ class RoadTypeReader:
         inputs[name] = self.memory.get(name, np.zeros(self.network.input_shape(name), dtype=np.float32))
     outputs = self.network(**{name: value for name, value in inputs.items() if name in names})
     self.memory = {name[:-len("_out")]: value for name, value in outputs.items() if name.endswith("_out")}
-    self.answers = (self.answers + [self.classes[int(np.argmax(outputs["probabilities"]))]])[-ROAD_TYPE_DEBOUNCE:]
+    probabilities = np.asarray(outputs["probabilities"]).reshape(-1)
+    index = int(np.argmax(probabilities))
+    answer = self.classes[index]
+    if answer == "zone30" and probabilities[index] < ZONE_CONFIDENCE:
+      answer = "town"
+    self.answers = (self.answers + [answer])[-ROAD_TYPE_DEBOUNCE:]
     if len(self.answers) == ROAD_TYPE_DEBOUNCE and len(set(self.answers)) == 1:
       self.road_type = self.answers[0]
     return self.road_type
@@ -476,6 +489,7 @@ class SpeedLimitMemory:
     self._road_type: str | None = None  # the road type of the last update, since _road_type_since
     self._road_type_since = -math.inf
     self._parking_since: float | None = None  # in a car park below PARKING_MAX_SPEED since
+    self._sign_at = -math.inf  # when a number or a road sign was last confirmed
 
   def _confirmed(self, now: float, values: list) -> list:
     self._seen = [(t, value) for t, value in self._seen if now - t <= CONFIRM_SECONDS]
@@ -489,6 +503,8 @@ class SpeedLimitMemory:
     return sorted(confirmed, key=lambda value: (-counts[value], (value or math.inf) if isinstance(value, float) else 0.0))
 
   def _general(self, road: str | None) -> float:
+    if road == "zone30":
+      return ZONE_LIMIT
     limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
     return float(limit or 0)
 
@@ -503,13 +519,16 @@ class SpeedLimitMemory:
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
              road_type: str | None = None, v_ego: float | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
-    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking), None without it;
+    road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking, zone30), None
+    without it;
     v_ego: the car's speed (m/s), None when unknown (then no car park)."""
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
     numbers = [value for value in confirmed if isinstance(value, float)]
     road_signs = [value for value in confirmed if isinstance(value, str)]
     self.sign_read = bool(confirmed)
+    if confirmed:
+      self._sign_at = now
     if road_type != self._road_type:
       self._road_type, self._road_type_since = road_type, now
     slow = v_ego is not None and v_ego < PARKING_MAX_SPEED
@@ -539,6 +558,9 @@ class SpeedLimitMemory:
     if numbers:
       value = numbers[0]
       if value == 0:
+        # The end of a limit in a 30 zone is its exit (the network still sees the zone for a few seconds): the town.
+        if self.road == "zone30":
+          self.road = "town"
         self._set(self._general(self.road), "sign")
         self._ramp_limit = False
       else:
@@ -552,6 +574,10 @@ class SpeedLimitMemory:
     if road_type in ROAD_KINDS and not self._ramp_limit and not road_signs and (
         self.source in (None, "parking") or self.source == "road" and now - self._road_type_since >= ROAD_TYPE_SECONDS):
       self._set(self._general(road_type), "road")
+      return self.speed_limit
+    if road_type == "zone30" and self.source == "sign" and not self._ramp_limit and \
+        self.speed_limit == self._general("town") and now - max(self._road_type_since, self._sign_at) >= ROAD_TYPE_SECONDS:
+      self._set(ZONE_LIMIT, "road")
       return self.speed_limit
 
     if self._ramp_limit:

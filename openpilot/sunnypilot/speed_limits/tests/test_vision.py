@@ -346,3 +346,44 @@ def test_road_type_input_is_the_resized_frame():
   expected = vision.resize(vision.yuv_to_rgb(y, uv, 0, height, 0, width), vision.ROAD_TYPE_WIDTH, vision.ROAD_TYPE_HEIGHT)
   assert np.array_equal(vision.RoadTypeInput(width, height)(y, uv)[0], expected.astype(np.float32) / 255.0)
 
+
+
+def test_memory_a_30_zone_seen_keeps_the_car_at_30():
+  memory = vision.SpeedLimitMemory()
+  assert memory.update(0.0, [], road_type="zone30") == 30  # the start of a drive inside a zone
+  assert drive(memory, 0.2, 9.0, road_type="town") == 30  # out of it: not long enough yet
+  assert drive(memory, 9.0, 11.0, road_type="town") == 50
+  # A 50 read on the main street, the gate of the zone missed: once the zone is seen long enough, 30.
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, [50], road_type="town") == 50 and memory.source == "sign"
+  assert drive(memory, 1.0, 10.0, road_type="zone30") == 50
+  assert drive(memory, 10.0, 12.0, road_type="zone30") == 30 and memory.source == "road"
+  # Its end sign: the town again, though the network still sees the zone for a moment.
+  assert confirm(memory, 20.0, [0], road_type="zone30") == 50
+  assert drive(memory, 21.0, 26.0, road_type="zone30") == 50
+  assert drive(memory, 26.0, 40.0, road_type="town") == 50
+  # A higher number holds: the network may be wrong about the zone.
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, [60], road_type="town") == 60
+  assert drive(memory, 1.0, 30.0, road_type="zone30") == 60
+
+
+class FakeZoneRoadType(FakeRoadType):
+  """A network of seven classes whose answer is zone30 as sure as asked in turn."""
+  CLASSES = ["town", "rural", "expressway", "motorway", "ramp", "parking", "zone30"]
+
+  def __call__(self, **inputs):
+    self.calls.append(inputs)
+    probabilities = np.zeros((1, 7), dtype=np.float32)
+    sure = next(self.answers)
+    probabilities[0, 6], probabilities[0, 0] = sure, 1 - sure
+    return {"probabilities": probabilities, "hidden_out": np.zeros((1, 4), dtype=np.float32)}
+
+
+def test_road_type_reader_says_zone30_only_when_sure():
+  height, width = 76, 134
+  y, uv = nv12(np.full((height, width), 128), np.full((height // 2, width // 2), 128), np.full((height // 2, width // 2), 128))
+  network = FakeZoneRoadType([0.85] * 3 + [0.95] * 3)
+  reader = vision.RoadTypeReader(network, FakeZoneRoadType.CLASSES, width, height)
+  motion = np.zeros((1, 8), dtype=np.float32)
+  assert [reader.step(float(t), y, uv, 8.0, 500.0, motion) for t in range(6)] == [None, None, "town", "town", "town", "zone30"]
