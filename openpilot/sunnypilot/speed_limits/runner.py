@@ -40,9 +40,11 @@ STALE_PARTIAL_SECONDS = 3600
 
 class Networks:
   """The files of the networks: SignNet (finder), the classifier and its classes, the name of the release; the road
-  type network and its classes when the release has one (road_type, optional in format 2)."""
+  type network and its classes when the release has one (road_type, optional in format 2); the settings of the vision
+  limit (settings, optional: vision.apply_settings)."""
   def __init__(self, manifest: dict):
     self.name = f"speed-limits {manifest['version']}"
+    self.settings: dict = manifest.get("settings") if isinstance(manifest.get("settings"), dict) else {}
     self.finder = MODELS_DIR / manifest["finder"]["file"]
     self.classifier = MODELS_DIR / manifest["classifier"]["file"]
     contract = json.loads((MODELS_DIR / manifest["classifier"]["contract"]).read_text())

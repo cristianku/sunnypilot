@@ -387,3 +387,22 @@ def test_road_type_reader_says_zone30_only_when_sure():
   reader = vision.RoadTypeReader(network, FakeZoneRoadType.CLASSES, width, height)
   motion = np.zeros((1, 8), dtype=np.float32)
   assert [reader.step(float(t), y, uv, 8.0, 500.0, motion) for t in range(6)] == [None, None, "town", "town", "town", "zone30"]
+
+
+def test_apply_settings_takes_only_known_numbers_in_bounds(monkeypatch):
+  for name, _, _ in vision.SETTINGS.values():
+    monkeypatch.setattr(vision, name, getattr(vision, name))
+  taken = vision.apply_settings({"zone_confidence": 0.95, "confirm_frames": 3, "road_type_debounce": 2.5,
+                                 "min_confidence": 2.0, "merge_seconds": True, "parking_limit": "20", "unknown": 1,
+                                 "road_type_seconds": float("nan")})
+  assert taken == {"zone_confidence": 0.95, "confirm_frames": 3}
+  assert vision.ZONE_CONFIDENCE == 0.95 and vision.CONFIRM_FRAMES == 3 and isinstance(vision.CONFIRM_FRAMES, int)
+  assert vision.ROAD_TYPE_DEBOUNCE == 3 and vision.MIN_CONFIDENCE == 0.7 and vision.MERGE_SECONDS == 8.0
+  assert vision.apply_settings(None) == {} and vision.apply_settings([1]) == {}
+
+
+def test_settings_change_the_memory(monkeypatch):
+  monkeypatch.setattr(vision, "CONFIRM_FRAMES", 2)
+  vision.apply_settings({"confirm_frames": 1})
+  memory = vision.SpeedLimitMemory()
+  assert memory.update(0.0, [80]) == 80

@@ -115,7 +115,37 @@ PARKING_SECONDS = 5.0
 PARKING_MAX_SPEED = 25 / 3.6
 ROAD_TYPE_SECONDS = 10.0
 
+# The settings the release may change (speed_limits.json "settings", set on the training server's portal, Models › On
+# the car): its key, the constant here, its bounds. A key not known, not a number or out of bounds keeps the default.
+SETTINGS = {
+  "min_confidence": ("MIN_CONFIDENCE", 0.3, 0.99),
+  "confirm_frames": ("CONFIRM_FRAMES", 1, 10),
+  "confirm_seconds": ("CONFIRM_SECONDS", 0.2, 5.0),
+  "road_type_debounce": ("ROAD_TYPE_DEBOUNCE", 1, 10),
+  "road_type_seconds": ("ROAD_TYPE_SECONDS", 2.0, 60.0),
+  "zone_confidence": ("ZONE_CONFIDENCE", 0.5, 0.999),
+  "parking_seconds": ("PARKING_SECONDS", 1.0, 30.0),
+  "parking_limit": ("PARKING_LIMIT", 5.0, 30.0),
+  "ramp_seconds": ("RAMP_SECONDS", 5.0, 120.0),
+  "merge_seconds": ("MERGE_SECONDS", 2.0, 30.0),
+}
+
 PRECISION_BITS = 22  # PIL's fixed point for 8-bit images (Resample.c)
+
+
+def apply_settings(settings) -> dict:
+  """The release's settings put in place of the constants (once, before the memory and the readers are made); returns
+  the ones taken. An integer setting takes only whole numbers."""
+  taken = {}
+  for key, value in (settings.items() if isinstance(settings, dict) else ()):
+    if key not in SETTINGS or isinstance(value, bool) or not isinstance(value, (int, float)):
+      continue
+    name, low, high = SETTINGS[key]
+    whole = isinstance(globals()[name], int)
+    if not low <= value <= high or not math.isfinite(value) or (whole and value != int(value)):
+      continue
+    globals()[name] = taken[key] = int(value) if whole else float(value)
+  return taken
 
 
 def _yuv_term(coefficient: int, offset: int) -> np.ndarray:

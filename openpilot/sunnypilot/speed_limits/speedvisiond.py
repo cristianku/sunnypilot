@@ -44,6 +44,9 @@ def main() -> None:
   files = runner.networks()
   if files is None:
     idle("the models repository has no speed-limits networks")
+  taken = vision.apply_settings(files.settings)
+  if taken:
+    cloudlog.warning(f"speedvisiond: settings of the release {taken}")
   try:
     signnet = runner.Network(runner.compile_network(files.finder))
     classifier = runner.Network(runner.compile_network(files.classifier))
