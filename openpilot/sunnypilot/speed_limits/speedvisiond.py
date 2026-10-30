@@ -8,8 +8,8 @@ See the LICENSE.md file in the root directory for more details.
 speedvisiond: the speed limit read on the road camera by the speed-limits networks (speedVisionSP, m/s, 0 when there
 is no reading), a few times a second. SignNet finds the signs in the top of the frame, the classifier reads each,
 and a reading becomes the limit when two frames agree; it stays until another sign. A sign of the kind of road (a
-motorway, a town, their ends) gives the road's general limit, and the limit of a motorway ramp ends once the car is
-on the carriageway (vision.SpeedLimitMemory). Once a second the road-type network, when the release has one, sees the
+motorway, a town, their ends) gives the road's general limit, and the limit of a motorway ramp ends at the start of
+the acceleration lane, or once the car is on the carriageway (vision.SpeedLimitMemory). Once a second the road-type network, when the release has one, sees the
 whole frame with the car's speed, steering, blinkers and yaw (carState, deviceMotion): where no sign gives the limit
 the scene does (a garage 10, a car park in the open 20, out of it the street's general limit, a town 50). IT NEVER
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
