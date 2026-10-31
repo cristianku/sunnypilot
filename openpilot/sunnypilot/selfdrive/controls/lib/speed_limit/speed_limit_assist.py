@@ -122,7 +122,8 @@ class SpeedLimitAssist:
     return bool(self.v_cruise_cluster_conv < CONFIRM_SPEED_THRESHOLD[self.is_metric])
 
   def update_active_event(self, events_sp: EventsSP) -> None:
-    if self.v_cruise_cluster_below_confirm_speed_threshold:
+    # automatic with pcm_op_long: the set speed is never changed, so never "Set speed changed"
+    if self.v_cruise_cluster_below_confirm_speed_threshold and not self.pcm_op_long:
       events_sp.add(EventNameSP.speedLimitChanged)
     else:
       events_sp.add(EventNameSP.speedLimitActive)

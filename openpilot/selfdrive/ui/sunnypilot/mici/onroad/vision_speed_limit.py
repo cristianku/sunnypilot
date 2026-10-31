@@ -68,6 +68,11 @@ class VisionSpeedLimit(Widget):
     self._final_last_valid: bool = False
     self._source: str = ""
     self._road_type: str = ""
+    self._road_lift: float = 0.
+
+  def set_road_lift(self, lift: float) -> None:
+    """Pixels the road type moves up, over the green AUTO square when it sits above the final limit."""
+    self._road_lift = lift
 
   def set_lift(self, lift: float) -> None:
     """0 in the corner, 1 above the steering wheel (while it shows); in between while it fades."""
@@ -119,7 +124,7 @@ class VisionSpeedLimit(Widget):
     final = rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE, SIZE, SIZE)
     if self._road_type:
       size = measure_text_cached(self._font, self._road_type, ROAD_FONT_SIZE)
-      rl.draw_text_ex(self._font, self._road_type, rl.Vector2(final.x + (SIZE - size.x) / 2, final.y - ROAD_GAP - size.y),
+      rl.draw_text_ex(self._font, self._road_type, rl.Vector2(final.x + (SIZE - size.x) / 2, final.y - ROAD_GAP - size.y - self._road_lift),
                       ROAD_FONT_SIZE, 0, FUCHSIA_LIGHT)
     self._render_final(final)
 

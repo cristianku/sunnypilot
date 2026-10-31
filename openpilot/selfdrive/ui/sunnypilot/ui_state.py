@@ -12,7 +12,7 @@ from opendbc.sunnypilot.car.interfaces import has_bsm
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.display import OnroadBrightness
 from openpilot.sunnypilot.models.helpers import ACTIVE_BUNDLE_KEYS, get_active_source
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode, Policy
 from openpilot.sunnypilot.sunnylink.sunnylink_state import SunnylinkState
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.sunnypilot.widgets.screen_saver import ScreenSaverSP
@@ -61,6 +61,7 @@ class UIStateSP:
     self.road_name_toggle: bool = False
     self.rocket_fuel: bool = False
     self.speed_limit_mode = None
+    self.speed_limit_auto_speed: bool = False
     self.speed_limit_vision_display: bool = False
     self.standstill_timer: bool = False
     self.sunnylink_enabled: bool = False
@@ -185,6 +186,9 @@ class UIStateSP:
     self.road_name_toggle = self.params.get_bool("RoadNameToggle")
     self.rocket_fuel = self.params.get_bool("RocketFuel")
     self.speed_limit_mode = self.params.get("SpeedLimitMode", return_default=True)
+    # Set Speed Only Engages (Alpha), only with Assist: the car drives to the limit, the set speed just engages.
+    self.speed_limit_auto_speed = (self.params.get_bool("SpeedLimitSetSpeedEngageOnly") and
+                                   self.speed_limit_mode == Mode.assist)
     # Map Data + Vision uses the network's limit, so it shows it too: one choice in Speed Limit Source is enough.
     self.speed_limit_vision_display = (self.params.get_bool("SpeedLimitVisionDisplay") or
                                        self.params.get("SpeedLimitPolicy", return_default=True) == Policy.map_data_vision)
