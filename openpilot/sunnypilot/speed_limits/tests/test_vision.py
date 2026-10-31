@@ -354,8 +354,8 @@ def test_memory_out_of_a_car_park_into_a_town():
   assert drive(memory, 0.0, 4.0, road_type="parking", v_ego=2.0) == 0  # not long enough yet
   assert drive(memory, 4.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT and memory.source == "parking"
   assert drive(memory, 6.0, 9.0, road_type="ramp", v_ego=4.0) == vision.GARAGE_LIMIT  # not a road with a limit
-  assert drive(memory, 9.0, 18.0, road_type="town", v_ego=6.0) == vision.GARAGE_LIMIT  # not long enough yet
-  assert drive(memory, 18.0, 20.0, road_type="town", v_ego=6.0) == 50 and memory.source == "road"  # the street
+  assert drive(memory, 9.0, 12.0, road_type="town", v_ego=6.0) == vision.GARAGE_LIMIT  # not long enough yet
+  assert drive(memory, 12.0, 20.0, road_type="town", v_ego=6.0) == 50 and memory.source == "road"  # the street
   assert confirm(memory, 25.0, [30], road_type="town") == 30 and memory.source == "sign"
   assert drive(memory, 26.0, 45.0, road_type="rural", v_ego=15.0) == 30  # a sign holds whatever the scene
 
@@ -363,8 +363,8 @@ def test_memory_out_of_a_car_park_into_a_town():
 def test_memory_a_moment_of_a_street_inside_a_car_park_keeps_it():
   memory = vision.SpeedLimitMemory()
   assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT
-  assert drive(memory, 6.0, 14.0, road_type="town", v_ego=5.0) == vision.GARAGE_LIMIT  # the network unsure: 8 s
-  assert drive(memory, 14.0, 20.0, road_type="parking", v_ego=0.0) == vision.GARAGE_LIMIT
+  assert drive(memory, 6.0, 8.8, road_type="town", v_ego=5.0) == vision.GARAGE_LIMIT  # the network unsure: 2.8 s
+  assert drive(memory, 8.8, 20.0, road_type="parking", v_ego=0.0) == vision.GARAGE_LIMIT
 
 
 def test_memory_the_scene_gives_the_limit_only_without_a_sign():
@@ -385,8 +385,8 @@ def test_memory_a_car_park_needs_a_slow_car_and_drops_the_road_before():
   assert drive(memory, 24.0, 30.0, road_type="parking", v_ego=3.0) == vision.GARAGE_LIMIT
   assert confirm(memory, 40.0, [30], road_type="parking", v_ego=3.0) == vision.GARAGE_LIMIT  # higher: not taken
   assert confirm(memory, 45.0, [5], road_type="parking", v_ego=3.0) == 5  # lower: taken
-  assert drive(memory, 50.0, 59.0, road_type="rural", v_ego=8.0) == 5  # still the car park
-  assert drive(memory, 59.0, 61.0, road_type="rural", v_ego=8.0) == 80
+  assert drive(memory, 50.0, 53.0, road_type="rural", v_ego=8.0) == 5  # still the car park
+  assert drive(memory, 53.0, 54.0, road_type="rural", v_ego=8.0) == 80
 
 
 def test_memory_a_garage_and_a_car_park_in_the_open():
@@ -525,6 +525,15 @@ def test_apply_settings_takes_only_known_numbers_in_bounds(monkeypatch):
   assert vision.ZONE_CONFIDENCE == 0.95 and vision.CONFIRM_FRAMES == 3 and isinstance(vision.CONFIRM_FRAMES, int)
   assert vision.ROAD_TYPE_DEBOUNCE == 3 and vision.MIN_CONFIDENCE == 0.7 and vision.MERGE_SECONDS == 8.0
   assert vision.apply_settings(None) == {} and vision.apply_settings([1]) == {}
+
+
+def test_the_exit_of_a_car_park_follows_its_setting(monkeypatch):
+  monkeypatch.setattr(vision, "PARKING_EXIT_SECONDS", vision.PARKING_EXIT_SECONDS)
+  assert vision.apply_settings({"parking_exit_seconds": 8.0}) == {"parking_exit_seconds": 8.0}
+  memory = vision.SpeedLimitMemory()
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT
+  assert drive(memory, 6.0, 14.0, road_type="town", v_ego=6.0) == vision.GARAGE_LIMIT
+  assert drive(memory, 14.0, 15.0, road_type="town", v_ego=6.0) == 50
 
 
 def test_settings_change_the_memory(monkeypatch):

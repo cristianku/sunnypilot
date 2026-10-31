@@ -112,14 +112,18 @@ MOTION_MIN_SAMPLES = 10
 # PARKING_SECONDS below PARKING_MAX_SPEED (m/s), and drops the limit of the road before: GARAGE_LIMIT underground or
 # indoors (garage), PARKING_LIMIT in the open (parking). A network trained before the class garage says parking for
 # both: then GARAGE_LIMIT (SpeedLimitMemory.garage_known). Out of it (a road type with a general limit seen for
-# ROAD_TYPE_SECONDS: a moment of a street inside a car park keeps it), or where nothing is held, the road type seen
-# gives its general limit (town: 50). Such a limit follows another road type only after ROAD_TYPE_SECONDS of it; a sign
-# always wins.
+# PARKING_EXIT_SECONDS after the debounce: a moment of a street inside a car park keeps it, and the car speeds up a few
+# seconds after it is out), or where nothing is held, the road type seen gives its general limit (town: 50). Such a
+# limit follows another road type only after ROAD_TYPE_SECONDS of it; a sign always wins.
 CAR_PARKS = ("parking", "garage")
 GARAGE_LIMIT = 10.0
 PARKING_LIMIT = 20.0
 PARKING_SECONDS = 5.0
 PARKING_MAX_SPEED = 25 / 3.6
+# 3 s: on the test drives of the scene networks (2026-10-30_1216 on the car, 0007, 0046) no car park left while still
+# inside, where 0 to 2 s left one once; 10 s (ROAD_TYPE_SECONDS, before) kept the car at the car park's limit 10 to
+# 13 s on the street.
+PARKING_EXIT_SECONDS = 3.0
 ROAD_TYPE_SECONDS = 10.0
 
 # The settings the release may change (speed_limits.json "settings", set on the training server's portal, Models › On
@@ -132,6 +136,7 @@ SETTINGS = {
   "road_type_seconds": ("ROAD_TYPE_SECONDS", 2.0, 60.0),
   "zone_confidence": ("ZONE_CONFIDENCE", 0.5, 0.999),
   "parking_seconds": ("PARKING_SECONDS", 1.0, 30.0),
+  "parking_exit_seconds": ("PARKING_EXIT_SECONDS", 0.0, 30.0),
   "parking_limit": ("PARKING_LIMIT", 5.0, 30.0),
   "garage_limit": ("GARAGE_LIMIT", 5.0, 30.0),
   "ramp_seconds": ("RAMP_SECONDS", 5.0, 120.0),
@@ -513,7 +518,7 @@ class SpeedLimitMemory:
 
   Where no sign gives the limit, the scene does (the road-type network): a car park gives its limit (GARAGE_LIMIT
   underground or indoors, PARKING_LIMIT in the open; another kind seen for PARKING_SECONDS inside, its limit; a sign
-  there only when lower) and drops the limit of the road before; leaving it (a road seen for ROAD_TYPE_SECONDS), or with
+  there only when lower) and drops the limit of the road before; leaving it (a road seen for PARKING_EXIT_SECONDS), or with
   nothing held (the start of a drive), the road type seen gives its general limit (a town: 50), which follows another
   road type only after ROAD_TYPE_SECONDS."""
   def __init__(self, country: str = DEFAULT_COUNTRY):
@@ -593,7 +598,7 @@ class SpeedLimitMemory:
       self._park, self._parking_since = park, now if park else None
     parking = park is not None and now - self._parking_since >= PARKING_SECONDS
 
-    left = road_type in ROAD_KINDS and now - self._road_type_since >= ROAD_TYPE_SECONDS
+    left = road_type in ROAD_KINDS and now - self._road_type_since >= PARKING_EXIT_SECONDS
     if parking or self.source == "parking" and not left:
       # In a car park: its limit (another kind seen long enough inside: its limit), a sign only when lower; the road
       # before is dropped.
