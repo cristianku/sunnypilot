@@ -20,6 +20,7 @@ class HudRendererSP(HudRenderer):
     self.vision_speed_limit = VisionSpeedLimit()
     self.auto_speed = AutoSpeed()
     self._sp_engaged: bool = False
+    self._auto_speed: bool = False
 
   def _update_state(self) -> None:
     super()._update_state()
@@ -30,19 +31,24 @@ class HudRendererSP(HudRenderer):
       self._chestnut_fade_time = rl.get_time() if sp_engaged else 0
     self._sp_engaged = sp_engaged
 
+    # as the planner: only with the big driving model (the external GPU), else the set speed is the maximum again
+    sm = ui_state.sm
+    self._auto_speed = ui_state.speed_limit_auto_speed and sm.alive['modelV2'] and sm['modelV2'].big
+
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
     # In the bottom left corner, above the steering wheel while it shows; under the blind spot warning.
     self.vision_speed_limit.set_lift(self._wheel_alpha_filter.x / (255 * 0.9))
-    self.vision_speed_limit.set_road_lift(self.auto_speed.height_above_final if ui_state.speed_limit_auto_speed else 0)
+    self.vision_speed_limit.set_road_lift(self.auto_speed.height_above_final if self._auto_speed else 0)
     self.vision_speed_limit.render(rect)
-    self.auto_speed.set_above_final(ui_state.speed_limit_vision_display)
-    self.auto_speed.render(rect)
+    if self._auto_speed:
+      self.auto_speed.set_above_final(ui_state.speed_limit_vision_display)
+      self.auto_speed.render(rect)
     self.blind_spot_indicators.render(rect)
 
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
     # Set Speed Only Engages: the set speed is not the speed, the green AUTO square says so instead
-    if ui_state.speed_limit_auto_speed:
+    if self._auto_speed:
       return
     super()._draw_set_speed(rect)
 

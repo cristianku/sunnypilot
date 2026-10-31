@@ -53,8 +53,10 @@ class LongitudinalPlannerSP:
                     self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp)
 
     # Set speed only engages: a known limit replaces the set speed, also above it. The set speed stays the
-    # target while no limit is known, and a forced deceleration always wins.
-    if self.sla.set_speed_engage_only and self.sla.output_v_target != V_CRUISE_UNSET and not sm['controlsState'].forceDecel:
+    # target while no limit is known, and a forced deceleration always wins. Only with the big driving model (the
+    # external GPU): the small one makes mistakes, so without it the set speed stays the driver's maximum.
+    auto_speed = self.sla.set_speed_engage_only and sm['modelV2'].big
+    if auto_speed and self.sla.output_v_target != V_CRUISE_UNSET and not sm['controlsState'].forceDecel:
       v_cruise = min(self.sla.output_v_target, V_CRUISE_MAX * CV.KPH_TO_MS)
 
     targets = {

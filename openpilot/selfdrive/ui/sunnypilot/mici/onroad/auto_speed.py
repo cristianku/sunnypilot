@@ -25,7 +25,8 @@ GREY = rl.Color(145, 155, 149, 255)
 
 class AutoSpeed(Widget):
   """Set Speed Only Engages (Alpha): a green square with an eye and AUTO, in the bottom right corner, above the final
-  limit when that shows. The car drives to the limit, the set speed only engages, so the set speed is not shown.
+  limit when that shows, only with the big driving model (the external GPU). The car drives to the limit, the set
+  speed only engages, so the set speed is not shown.
   Green while Speed Limit Assist drives to a limit; dark with a green border while the set speed holds (not engaged,
   or no limit known yet)."""
   def __init__(self):

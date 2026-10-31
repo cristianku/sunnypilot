@@ -171,8 +171,9 @@ sections:
       widget: toggle
       title: Set Speed Only Engages (Alpha)
       description: The car drives at the speed limit it knows, also above the set speed. The set speed only engages,
-        and is the speed while no limit is known. Curves still slow the car down. A green AUTO square shows it on the
-        driving screen, and the set speed is no longer shown.
+        and is the speed while no limit is known. Curves still slow the car down. Only with the external GPU (the big
+        driving model); without it the set speed stays the maximum. A green AUTO square shows it on the driving
+        screen, and the set speed is no longer shown.
       visibility:
       - type: param
         key: SpeedLimitMode
