@@ -544,6 +544,15 @@ def test_apply_settings_takes_only_known_numbers_in_bounds(monkeypatch):
   assert vision.apply_settings(None) == {} and vision.apply_settings([1]) == {}
 
 
+def test_a_limit_read_off_the_carriageway_follows_its_setting(monkeypatch):
+  monkeypatch.setattr(vision, "CARRIAGEWAY_LAG", vision.CARRIAGEWAY_LAG)
+  assert vision.apply_settings({"carriageway_lag": 0.0}) == {"carriageway_lag": 0.0}
+  memory = vision.SpeedLimitMemory()
+  drive(memory, 0.0, 17.0, road_type="rural")
+  assert confirm(memory, 17.0, [80], road_type="rural") == 80
+  assert drive(memory, 18.0, 30.0, road_type="motorway") == 120  # no lag: read before the motorway, it ends
+
+
 def test_the_exit_of_a_car_park_follows_its_setting(monkeypatch):
   monkeypatch.setattr(vision, "PARKING_EXIT_SECONDS", vision.PARKING_EXIT_SECONDS)
   assert vision.apply_settings({"parking_exit_seconds": 8.0}) == {"parking_exit_seconds": 8.0}

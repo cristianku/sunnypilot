@@ -147,6 +147,7 @@ SETTINGS = {
   "garage_limit": ("GARAGE_LIMIT", 5.0, 30.0),
   "ramp_seconds": ("RAMP_SECONDS", 5.0, 120.0),
   "merge_seconds": ("MERGE_SECONDS", 2.0, 30.0),
+  "carriageway_lag": ("CARRIAGEWAY_LAG", 0.0, 30.0),
 }
 
 PRECISION_BITS = 22  # PIL's fixed point for 8-bit images (Resample.c)
