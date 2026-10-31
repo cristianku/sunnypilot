@@ -151,6 +151,28 @@ LIMIT_REASONS = (
 # a limit on a road of unknown kind). speed_limit is 0 unless "limit".
 LIMIT_STATES = ("limit", "none", "unknown")
 
+# The distance to the round sign ahead (SignDistance, speedVisionSP.signDistance): shown on the screen for the driver to
+# check, and logged; nothing on the car reads it. A round sign (ROUND_SIGNS: a number, the end of a limit) of side s
+# pixels is f * D / s metres away, f the road camera's focal length in pixels and D the sign's diameter, by the kind of
+# road the memory knows (SIGN_DIAMETERS, the Swiss sizes; DEFAULT_SIGN_DIAMETER when not known). As the car drives
+# towards it, 1 / s falls in a line with the metres driven, to 0 at the sign: the sightings of the sign are fitted to
+# that line, D held near the road's size (within about DISTANCE_DIAMETER_SPREAD of it) and the box's side taken as
+# right within about DISTANCE_SIDE_NOISE, so the distance gets surer, and a wrong size is corrected, as the sign grows.
+# Between the sightings, and once the sign has left the frame, the metres driven are taken off, down to 0 when the car
+# passes it; DISTANCE_SECONDS after the last sighting it is 0 too (the car turned, or stopped).
+ROUND_SIGNS = ("maximum_speed", "cancellation")
+SIGN_DIAMETERS = {"town": 0.6, "zone30": 0.6, "rural": 0.8, "expressway": 1.0, "motorway": 1.2}
+DEFAULT_SIGN_DIAMETER = 0.8
+DISTANCE_DIAMETER_SPREAD = 0.25
+DISTANCE_SIDE_NOISE = 0.1
+DISTANCE_SECONDS = 15.0
+# The same sign again: its class, seen within TRACK_SECONDS of the last sighting and not smaller than TRACK_SHRINK of
+# its last side (the car drives towards it). Else another sign, its sightings from scratch.
+TRACK_SECONDS = 2.0
+TRACK_SHRINK = 0.8
+TRACK_SIGHTINGS = 50  # the last 10 s of sightings at most (stopped in front of a sign)
+ODOMETER_MAX_STEP = 0.1  # seconds: a longer gap between two carState messages adds nothing
+
 # The settings the release may change (speed_limits.json "settings", set on the training server's portal, Models › On
 # the car): its key, the constant here, its bounds. A key not known, not a number or out of bounds keeps the default.
 SETTINGS = {
@@ -776,3 +798,58 @@ class SpeedLimitMemory:
       self._merge_since = None
       self._joined_at = now
     return self.speed_limit
+
+
+class SignDistance:
+  """The distance (m) to the round sign ahead the classifier reads sure enough (ROUND_SIGNS; the largest of a frame,
+  the nearest), 0 without one or with a focal length of 0: see SIGN_DIAMETERS. The camera and the car's speed only,
+  never the map."""
+  def __init__(self, focal_length: float):
+    self.focal_length = focal_length
+    self.odometer = 0.0  # metres driven since the start
+    self._speed: tuple[float, float] | None = None  # the last carState: its time (s), vEgo (m/s)
+    self._class = ""
+    self._sightings: list[tuple[float, float]] = []  # the sign's: odometer, side (frame pixels)
+    self._seen_at = -math.inf
+    self._distance = 0.0  # at the last sighting
+    self.side = 0.0  # the side (frame pixels) of the sign seen in the last update, 0 when none
+
+  def add_speed(self, t: float, v_ego: float) -> None:
+    """A carState: its time (s, logMonoTime) and vEgo (m/s)."""
+    if self._speed is not None:
+      last_t, last_v = self._speed
+      if 0 < t - last_t <= ODOMETER_MAX_STEP:
+        self.odometer += max(0.0, last_v) * (t - last_t)
+    self._speed = (t, v_ego)
+
+  def _fitted(self, diameter: float) -> float:
+    """The distance (m) at the last sighting: 1 / s = a - b x (x the metres driven, b = 1 / (f D)), least squares
+    weighted by the side's noise, b drawn to the road's size."""
+    x = np.array([odometer for odometer, _ in self._sightings])
+    y = 1.0 / np.array([side for _, side in self._sightings])
+    w = 1.0 / (DISTANCE_SIDE_NOISE * y) ** 2
+    b0 = 1.0 / (self.focal_length * diameter)
+    pull = 1.0 / (DISTANCE_DIAMETER_SPREAD * b0) ** 2
+    sx, sxx = (w * x).sum(), (w * x * x).sum()
+    a, b = np.linalg.solve([[w.sum(), -sx], [-sx, sxx + pull]], [(w * y).sum(), pull * b0 - (w * x * y).sum()])
+    if b < b0 / 4:  # sides that do not grow (a parked car's sign, noise): the road's size alone
+      return self.focal_length * diameter / self._sightings[-1][1]
+    return float((a - b * x[-1]) / b)
+
+  def update(self, now: float, signs: list[dict], road: str | None) -> float:
+    """signs: the frame's (read_signs); road: the kind of road the memory knows (SpeedLimitMemory.road)."""
+    seen = [sign for sign in signs if sign["confidence"] >= MIN_CONFIDENCE and
+            sign["class"].partition(":")[0] in ROUND_SIGNS]
+    self.side = 0.0
+    if seen and self.focal_length > 0:  # 0: a camera not known
+      # The height: seen from the side a round sign is narrower, never lower.
+      side, name = max((max(x2 - x1, y2 - y1), sign["class"]) for sign in seen for x1, y1, x2, y2 in [sign["box"]])
+      if name != self._class or now - self._seen_at > TRACK_SECONDS or not self._sightings or \
+          side < TRACK_SHRINK * self._sightings[-1][1]:
+        self._sightings = []
+      self._class, self._seen_at, self.side = name, now, side
+      self._sightings = self._sightings[-(TRACK_SIGHTINGS - 1):] + [(self.odometer, side)]
+      self._distance = self._fitted(SIGN_DIAMETERS.get(road or "", DEFAULT_SIGN_DIAMETER))
+    if now - self._seen_at > DISTANCE_SECONDS:
+      return 0.0
+    return max(0.0, self._distance - (self.odometer - self._sightings[-1][0]))

@@ -21,7 +21,8 @@ try:
 except ImportError:  # no opendbc (cereal's import path): the file alone
   CEREAL_CUSTOM = None
 FIELDS = {"speedLimit": 0, "modelName": 1, "signRead": 2, "roadType": 3, "speedLimitState": 4, "speedLimitReason": 5,
-          "rawSignClass": 6, "rawSignSpeed": 7, "rawSignConfidence": 8, "rawSignTaken": 9}
+          "rawSignClass": 6, "rawSignSpeed": 7, "rawSignConfidence": 8, "rawSignTaken": 9, "signDistance": 10,
+          "signSize": 11}
 # speedVisionSP before the fields for the logs: an old log's message.
 OLD = """@0xe0b6b2b0c0a1d2f3;
 struct SpeedVisionSP {

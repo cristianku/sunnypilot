@@ -15,6 +15,8 @@ the scene does (a garage 10, a car park in the open 20, out of it the street's g
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
 Limit is on or Speed Limit Source is Map Data + Vision. For the logs, each message also says what the limit says
 (speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
+While a round sign is ahead, the distance to it from its size on the camera and the metres driven (signDistance,
+vision.SignDistance) shows on the screen for the driver to check; nothing on the car uses it.
 """
 import os
 os.environ['GMMU'] = '0'
@@ -28,10 +30,17 @@ from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.sunnypilot.speed_limits import runner, vision
 
 PERIOD = 0.2  # seconds between the frames read
 NICENESS = 10  # the frame's preparation takes 100 ms on a little core: the driving processes come first
+
+
+def focal_length(width: int, height: int) -> float:
+  """The road camera's focal length (pixels) for its frames of width x height; 0 for a camera not known (no distance)."""
+  return next((config.narrow_road.focal_length for config in DEVICE_CAMERAS.values()
+               if (config.narrow_road.width, config.narrow_road.height) == (width, height)), 0.0)
 
 
 def idle(reason: str) -> NoReturn:
@@ -86,6 +95,7 @@ def main() -> None:
   memory = vision.SpeedLimitMemory(Params().get("OsmLocationName") or vision.DEFAULT_COUNTRY)
   memory.garage_known = road_types is not None and "garage" in road_types.classes
   motion = vision.CarMotion()
+  distance = vision.SignDistance(focal_length(client.width, client.height))
   v_ego: float | None = None
   next_frame = 0.0
   while True:
@@ -96,6 +106,7 @@ def main() -> None:
     for event in messaging.drain_sock(car["carState"]):
       state = event.carState
       v_ego = state.vEgo
+      distance.add_speed(event.logMonoTime * 1e-9, v_ego)
       motion.add_car_state(now, state.steeringAngleDeg, state.leftBlinker, state.rightBlinker, state.yawRate)
     for event in messaging.drain_sock(car["deviceMotion"]):
       yaw = event.deviceMotion.angularVelocityDevice
@@ -119,6 +130,8 @@ def main() -> None:
     msg.speedVisionSP.signRead = memory.sign_read
     msg.speedVisionSP.roadType = road_type or ""
     memory.fill_log(msg.speedVisionSP)  # for the logs: why the limit is what it is, the last sign read taken or not
+    msg.speedVisionSP.signDistance = distance.update(now, signs, memory.road)
+    msg.speedVisionSP.signSize = distance.side
     pm.send("speedVisionSP", msg)
 
 

@@ -55,12 +55,13 @@ class VisionSpeedLimit(Widget):
   dash means no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read,
   even one that gives the limit already shown. In the bottom right corner the final limit, the network's weighed with
   the map and the car by the resolver, grey while only its last one holds; above it the kind of road the network
-  sees."""
+  sees. While the network sees a round sign ahead, the distance to it replaces the eye."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
     self._eye: rl.Texture = gui_app.texture("icons_mici/onroad/eye_fill.png", EYE_WIDTH, EYE_HEIGHT)
     self._speed_limit: float = 0.
+    self._distance: str = ""
     self._lift: float = 0.
     self._pulse_at: float = -math.inf
     self._final: float = 0.
@@ -86,6 +87,9 @@ class VisionSpeedLimit(Widget):
     speed_conv = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
     self._speed_limit = max(0., speed_limit) * speed_conv
     self._road_type = sm['speedVisionSP'].roadType if sm.alive['speedVisionSP'] else ""
+    distance = sm['speedVisionSP'].signDistance if sm.alive['speedVisionSP'] else 0.
+    shown, unit = (round(distance), "m") if ui_state.is_metric else (round(distance * CV.METER_TO_FOOT), "ft")
+    self._distance = f"{shown} {unit}" if shown > 0 else ""
 
     resolver = sm['longitudinalPlanSP'].speedLimit.resolver
     alive = sm.alive['longitudinalPlanSP']
@@ -110,8 +114,15 @@ class VisionSpeedLimit(Widget):
     rl.draw_rectangle_rounded(box, ROUNDNESS, SEGMENTS, FUCHSIA if has_limit else DARK_GREY)
     rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, FUCHSIA_LIGHT if has_limit else FUCHSIA)
 
-    eye_x = box.x + (SIZE - self._eye.width) / 2
-    rl.draw_texture_v(self._eye, rl.Vector2(eye_x, box.y + EYE_TOP), rl.WHITE if has_limit else GREY)
+    # While a round sign is ahead, the distance to it (speedVisionSP.signDistance, from its size on the camera) takes
+    # the eye's place, as small as the source, for the driver to check: m, ft without metric units.
+    if self._distance:
+      size = measure_text_cached(self._font, self._distance, SOURCE_FONT_SIZE)
+      rl.draw_text_ex(self._font, self._distance, rl.Vector2(box.x + (SIZE - size.x) / 2, box.y + SOURCE_TOP),
+                      SOURCE_FONT_SIZE, 0, rl.WHITE)
+    else:
+      eye_x = box.x + (SIZE - self._eye.width) / 2
+      rl.draw_texture_v(self._eye, rl.Vector2(eye_x, box.y + EYE_TOP), rl.WHITE if has_limit else GREY)
 
     text = str(round(self._speed_limit)) if has_limit else "-"
     font_size = FONT_SIZE if len(text) < 3 else FONT_SIZE_3_DIGITS

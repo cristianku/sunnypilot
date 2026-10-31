@@ -701,3 +701,88 @@ def test_memory_a_raw_reading_confirmed_but_overruled_is_not_taken():
   end = reading("other_sign:motorway_end", 0.9)
   memory.update(5.0, [], ["other_sign:motorway_end"], raw=end)
   assert memory.update(5.2, [], ["other_sign:motorway_end"], raw=end) == 90 and not memory.raw_taken  # it keeps the 90
+
+
+FOCAL = 1141.5  # the comma 4's road camera, 1344 x 760
+
+
+def sign_at(distance: float, diameter: float = 0.8, name: str = "maximum_speed:80", confidence: float = 0.9) -> dict:
+  side = FOCAL * diameter / distance
+  return {"box": [600.0, 100.0, 600.0 + side * 0.7, 100.0 + side], "class": name, "confidence": confidence}
+
+
+def approach(signs_at, road: str | None = "rural", speed: float = 20.0, seconds: float = 6.0, start: float = 90.0):
+  """A drive at speed (m/s) towards a sign start metres ahead, a frame every 0.2 s: signs_at(distance) gives the
+  frame's signs. The distance shown at each frame, with the true one."""
+  sign_distance = vision.SignDistance(FOCAL)
+  shown = []
+  for step in range(int(seconds * 100) + 1):
+    t = step / 100
+    sign_distance.add_speed(t, speed)
+    if step % 20 == 0:
+      true = start - sign_distance.odometer
+      shown.append((true, sign_distance.update(t, signs_at(true), road)))
+  return shown
+
+
+def test_sign_distance_from_the_size_of_the_road():
+  shown = approach(lambda d: [sign_at(d)] if d > 15 else [])
+  assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 0)
+  # Out of the frame from 15 m, the metres driven are taken off; passed, 0.
+  assert [estimate for true, estimate in shown if true <= 0] == [0.0] * len([true for true, _ in shown if true <= 0])
+  assert shown[0][1] == pytest.approx(90, abs=0.01)
+
+
+def test_sign_distance_corrects_a_wrong_size_as_the_sign_grows():
+  # A 60 cm sign on a road taken as rural (80 cm): first seen a third too far, then corrected.
+  shown = [(true, estimate) for true, estimate in approach(lambda d: [sign_at(d, 0.6)] if 15 < d < 85 else [])
+           if 15 < true < 85]
+  assert shown[0][1] == pytest.approx(shown[0][0] * 0.8 / 0.6, rel=0.01)
+  assert shown[-1][1] == pytest.approx(shown[-1][0], abs=1.5)
+  errors = [abs(estimate - true) for true, estimate in shown]
+  assert errors == sorted(errors, reverse=True)
+
+
+def test_sign_distance_takes_the_size_of_the_road_kind():
+  town = approach(lambda d: [sign_at(d, 0.6)] if d < 60 else [], road="town")
+  motorway = approach(lambda d: [sign_at(d, 1.2)] if d < 60 else [], road="motorway")
+  first = [next(estimate for true, estimate in shown if estimate > 0) for shown in (town, motorway)]
+  assert first == [pytest.approx(next(true for true, _ in town if true < 60), abs=0.01),
+                   pytest.approx(next(true for true, _ in motorway if true < 60), abs=0.01)]
+
+
+def test_sign_distance_reads_only_round_signs_read_sure_enough():
+  for name, confidence in (("road_marking:50", 0.9), ("variable_display:80", 0.9), ("other_sign:motorway_start", 0.9),
+                           ("maximum_speed:80", 0.5)):
+    shown = approach(lambda d, name=name, confidence=confidence: [sign_at(d, name=name, confidence=confidence)])
+    assert all(estimate == 0 for _, estimate in shown)
+  assert approach(lambda d: [sign_at(d, name="cancellation")])[0][1] == pytest.approx(90, abs=0.01)
+
+
+def test_sign_distance_takes_the_nearest_sign_and_starts_again_on_another():
+  near = approach(lambda d: [sign_at(d + 30), sign_at(d)] if d > 15 else [])
+  assert near[0][1] == pytest.approx(90, abs=0.01)
+  # A sign of another class farther on: its own distance, from its own size.
+  shown = approach(lambda d: [sign_at(d)] if d > 40 else [sign_at(d + 50, name="maximum_speed:60")] if d > 15 else [])
+  after = [(true, estimate) for true, estimate in shown if 15 < true <= 40]
+  assert all(estimate == pytest.approx(true + 50, abs=0.01) for true, estimate in after)
+
+
+def test_sign_distance_ends_some_seconds_after_the_last_sighting():
+  # Stopped 30 m before a sign seen once: it holds, then goes after DISTANCE_SECONDS.
+  sign_distance = vision.SignDistance(FOCAL)
+  assert sign_distance.update(0.0, [sign_at(30)], "rural") == pytest.approx(30)
+  assert sign_distance.update(vision.DISTANCE_SECONDS, [], "rural") == pytest.approx(30)
+  assert sign_distance.update(vision.DISTANCE_SECONDS + 0.2, [], "rural") == 0
+  assert sign_distance.side == 0
+
+
+def test_sign_distance_needs_the_focal_length():
+  assert vision.SignDistance(0.0).update(0.0, [sign_at(30)], "rural") == 0
+
+
+def test_odometer_skips_gaps_in_the_car_state():
+  sign_distance = vision.SignDistance(FOCAL)
+  for t, v in ((0.0, 10.0), (0.01, 10.0), (0.02, 10.0), (5.0, 10.0), (5.01, -1.0), (5.02, 0.0)):
+    sign_distance.add_speed(t, v)
+  assert sign_distance.odometer == pytest.approx(0.3)
