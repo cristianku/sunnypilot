@@ -302,6 +302,23 @@ def test_memory_the_acceleration_lane_counts_for_the_carriageways_scene_limit():
   assert drive(memory, 29.0, 30.4, road_type="motorway") == 120  # ROAD_TYPE_SECONDS from the lane's start
 
 
+def test_memory_a_limit_read_off_the_carriageway_ends_on_it():
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, [60], road_type="rural") == 60  # before the entry; its end sign and the ramp missed
+  assert drive(memory, 1.0, 20.0, road_type="rural") == 60
+  assert drive(memory, 20.0, 29.8, road_type="motorway") == 60  # on the motorway, not long enough
+  assert drive(memory, 29.8, 31.0, road_type="motorway") == 120 and memory.road == "motorway"
+  assert confirm(memory, 40.0, [80], road_type="motorway") == 80  # roadworks on the motorway hold
+  assert drive(memory, 41.0, 100.0, road_type="motorway") == 80
+
+
+def test_memory_a_limit_read_just_before_the_network_sees_the_carriageway_holds():
+  memory = vision.SpeedLimitMemory()
+  drive(memory, 0.0, 17.0, road_type="rural")
+  assert confirm(memory, 17.0, [80], road_type="rural") == 80  # on the motorway already: the debounce lags
+  assert drive(memory, 18.0, 60.0, road_type="motorway") == 80
+
+
 def test_memory_ramp_limit_holds_without_the_network():
   memory = vision.SpeedLimitMemory()
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])

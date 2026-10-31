@@ -85,6 +85,12 @@ ROAD_SIGNS = {
 # Once on the acceleration lane, or past a ramp's limit, a number is the carriageway's, however near its sign.
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8.0
+# A number read off the carriageways (in a town, on a rural road, before a ramp the network did not see: its end sign
+# missed) does not go onto a motorway or an expressway: once the network has seen the carriageway for ROAD_TYPE_SECONDS,
+# its general limit. Roadworks there repeat their sign on the carriageway, which the camera reads again. A number read
+# less than CARRIAGEWAY_LAG seconds before the network saw the carriageway may be the carriageway's (its debounce lags
+# the scene): it holds.
+CARRIAGEWAY_LAG = 5.0
 
 # The road-type network (optional in a release, RoadTypeReader): one step a second on the whole frame at 256 x 144, its
 # memory carried from step to step; its answer counts once the same class comes ROAD_TYPE_DEBOUNCE steps in a row.
@@ -514,7 +520,8 @@ class SpeedLimitMemory:
   RAMP_SECONDS of a motorway or expressway sign (not on an acceleration lane or past one since that sign: there it is
   the carriageway's) is taken as the ramp's, and from the acceleration lane (the road-type
   network's merge, the carriageway known from its sign) or once the network sees the carriageway the general limit of
-  the road comes back, so the car can speed up to join the traffic.
+  the road comes back, so the car can speed up to join the traffic. A number read off the carriageways ends the same
+  way once the network has seen the carriageway for a while (CARRIAGEWAY_LAG): its end sign or the ramp was missed.
 
   Where no sign gives the limit, the scene does (the road-type network): a car park gives its limit (GARAGE_LIMIT
   underground or indoors, PARKING_LIMIT in the open; another kind seen for PARKING_SECONDS inside, its limit; a sign
@@ -531,6 +538,7 @@ class SpeedLimitMemory:
     self._road_sign_kind: str | None = None  # motorway or expressway: the last of their signs confirmed
     self._ramp_road: str | None = None  # the carriageway the ramp joins, known from its sign; None: not known
     self._joined_at = -math.inf  # when the car was last on an acceleration lane or past a ramp's limit
+    self._number_at = -math.inf  # when the number held was read off the carriageways; -inf: on one, or not known
     self._merge_since: float | None = None
     self.sign_read = False  # a number or a road sign was confirmed in the last update (the limit held again too)
     # What gives the limit held: "sign", "road" (the road type seen), "parking", None (no limit).
@@ -605,7 +613,7 @@ class SpeedLimitMemory:
       if parking and (self.source != "parking" or self._park_limit(park) != self._park_limit(self._held_park)):
         self._held_park = park
         self._set(self._park_limit(park), "parking")
-        self.road, self._ramp_limit, self._merge_since = None, False, None
+        self.road, self._ramp_limit, self._merge_since, self._number_at = None, False, None, -math.inf
       if numbers and 0 < numbers[0] < self.speed_limit:
         self._set(numbers[0], "parking")
       return self.speed_limit
@@ -615,6 +623,7 @@ class SpeedLimitMemory:
       if self.country not in ROAD_SIGN_KEEPS_LIMIT or self.speed_limit <= 0:
         self._set(self._general(self.road), "sign")
       self._ramp_limit = False
+      self._number_at = -math.inf
       if self.road in CARRIAGEWAYS:
         self._road_sign_at, self._road_sign_kind = now, self.road
       else:
@@ -633,12 +642,23 @@ class SpeedLimitMemory:
           self.road = "town"
         self._set(self._general(self.road), "sign")
         self._ramp_limit = False
+        self._number_at = -math.inf
       else:
         self._set(value, "sign")
+        off = road_type is not None and road_type not in CARRIAGEWAYS and road_type != "merge"
+        self._number_at = now if off else -math.inf
         near = now - self._road_sign_at <= RAMP_SECONDS and self._joined_at < self._road_sign_at
         self._ramp_limit = road_type == "ramp" or near
         self._ramp_road = self._road_sign_kind if near else None
       self._merge_since = None
+      return self.speed_limit
+
+    if road_type in CARRIAGEWAYS and not road_signs and self._number_at > -math.inf and \
+        self._road_type_since - self._number_at >= CARRIAGEWAY_LAG and now - self._road_type_since >= ROAD_TYPE_SECONDS:
+      self.road = road_type
+      self._set(self._general(road_type), "sign")  # the carriageway's own limit: until the next sign
+      self._ramp_limit, self._merge_since, self._number_at = False, None, -math.inf
+      self._joined_at = now
       return self.speed_limit
 
     # The scene where no sign gives the limit: out of a car park or with nothing held, the road type's general limit
@@ -667,6 +687,7 @@ class SpeedLimitMemory:
       self.road = carriageway
       self._set(self._general(carriageway), "sign")  # the road's own limit after the ramp's sign: until the next sign
       self._ramp_limit = False
+      self._number_at = -math.inf
       self._merge_since = None
       self._joined_at = now
     return self.speed_limit
