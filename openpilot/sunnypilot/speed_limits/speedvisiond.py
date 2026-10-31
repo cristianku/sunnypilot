@@ -13,7 +13,8 @@ the acceleration lane, or once the car is on the carriageway (vision.SpeedLimitM
 whole frame with the car's speed, steering, blinkers and yaw (carState, deviceMotion): where no sign gives the limit
 the scene does (a garage 10, a car park in the open 20, out of it the street's general limit, a town 50). IT NEVER
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
-Limit is on or Speed Limit Source is Map Data + Vision.
+Limit is on or Speed Limit Source is Map Data + Vision. For the logs, each message also says what the limit says
+(speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
 """
 import os
 os.environ['GMMU'] = '0'
@@ -106,19 +107,18 @@ def main() -> None:
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
-    sure = [sign for sign in signs if sign["confidence"] >= vision.MIN_CONFIDENCE]
     if road_types is not None and road_types.due(now):
       # Right after SignNet, while the GPU is still free of the driving model.
       road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now))
     road_type = road_types.road_type if road_types is not None else None
-    speed_limit = memory.update(now, [sign["speed"] for sign in sure if sign["speed"] is not None],
-                                [sign["class"] for sign in sure], road_type=road_type, v_ego=v_ego)
+    speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
 
     msg = messaging.new_message("speedVisionSP", valid=True)
     msg.speedVisionSP.speedLimit = float(speed_limit * CV.KPH_TO_MS)
     msg.speedVisionSP.modelName = files.name
     msg.speedVisionSP.signRead = memory.sign_read
     msg.speedVisionSP.roadType = road_type or ""
+    memory.fill_log(msg.speedVisionSP)  # for the logs: why the limit is what it is, the last sign read taken or not
     pm.send("speedVisionSP", msg)
 
 

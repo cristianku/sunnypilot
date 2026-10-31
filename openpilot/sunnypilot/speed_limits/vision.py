@@ -132,6 +132,25 @@ PARKING_MAX_SPEED = 25 / 3.6
 PARKING_EXIT_SECONDS = 3.0
 ROAD_TYPE_SECONDS = 10.0
 
+# For the logs only (speedVisionSP), nothing here reads them. The rule that set the limit held (SpeedLimitMemory.
+# limit_reason; "" before the first), kept while a rule that reads no sign only sets the same limit and state again: a
+# limit has no timeout, it holds until one of these sets another.
+LIMIT_REASONS = (
+  "sign",  # a number confirmed (in a car park, one lower than its limit)
+  "end_sign",  # the end of a limit confirmed: the general limit of the road whose kind is known, else 0 (unknown)
+  "road_sign",  # a sign of the kind of road confirmed (ROAD_SIGNS): its general limit
+  "ramp_end",  # the ramp's limit ended: on the acceleration lane of a known carriageway, or MERGE_SECONDS on one
+  "carriageway",  # a number read off the carriageways ended once the carriageway was seen: its general limit
+  "car_park",  # a car park seen for PARKING_SECONDS below PARKING_MAX_SPEED: GARAGE_LIMIT or PARKING_LIMIT
+  "road_type",  # the road type seen where no sign gives the limit (nothing held, out of a car park, another road type
+                # for ROAD_TYPE_SECONDS): its general limit
+  "zone30",  # a 30 zone seen for ROAD_TYPE_SECONDS lowers a town's general limit held from a sign
+)
+# What the limit held says (SpeedLimitMemory.limit_state): "limit" (speed_limit is the limit), "none" (the road's kind
+# is known and has no general limit: the German motorway), "unknown" (nothing gives one: the start of a drive, the end of
+# a limit on a road of unknown kind). speed_limit is 0 unless "limit".
+LIMIT_STATES = ("limit", "none", "unknown")
+
 # The settings the release may change (speed_limits.json "settings", set on the training server's portal, Models › On
 # the car): its key, the constant here, its bounds. A key not known, not a number or out of bounds keeps the default.
 SETTINGS = {
@@ -510,6 +529,18 @@ def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finde
   return signs
 
 
+def raw_reading(signs: list[dict]) -> dict | None:
+  """The sign of a frame (read_signs) the memory can take, a speed, the end of a limit or a sign of the kind of road,
+  read with the highest confidence, sure enough or not; None without one. For the logs: a wrong reading shows even
+  when it was dropped."""
+  best = None
+  for sign in signs:
+    if (best is None or sign["confidence"] > best["confidence"]) and \
+        (sign["class"] in ROAD_SIGNS or class_speed(sign["class"]) is not None):
+      best = sign
+  return best
+
+
 class SpeedLimitMemory:
   """The limit shown (km/h, 0: none). A number becomes the limit when it is read in CONFIRM_FRAMES frames within
   CONFIRM_SECONDS, and stays until another one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
@@ -528,7 +559,11 @@ class SpeedLimitMemory:
   underground or indoors, PARKING_LIMIT in the open; another kind seen for PARKING_SECONDS inside, its limit; a sign
   there only when lower) and drops the limit of the road before; leaving it (a road seen for PARKING_EXIT_SECONDS), or with
   nothing held (the start of a drive), the road type seen gives its general limit (a town: 50), which follows another
-  road type only after ROAD_TYPE_SECONDS."""
+  road type only after ROAD_TYPE_SECONDS.
+
+  For the logs, and nothing else: the rule that set the limit held (limit_reason, LIMIT_REASONS), what the limit says
+  (limit_state, LIMIT_STATES) and the last raw reading given to update (raw_reading) with whether the limit was set
+  from it in its frame (raw_class, raw_speed, raw_confidence, raw_taken); fill_log writes them in speedVisionSP."""
   def __init__(self, country: str = DEFAULT_COUNTRY):
     self.speed_limit = 0.0
     self.country = country if country in IMPLICIT_LIMITS else DEFAULT_COUNTRY
@@ -553,6 +588,15 @@ class SpeedLimitMemory:
     # may be either and gives GARAGE_LIMIT. speedvisiond sets it from the network's classes.
     self.garage_known = False
     self._sign_at = -math.inf  # when a number or a road sign was last confirmed
+    self.limit_reason = ""  # the rule that set the limit held (LIMIT_REASONS), "" before the first
+    self.limit_state = "unknown"  # what the limit says (LIMIT_STATES)
+    self._taken: float | str | None = None  # what set the limit in this update: a number, a road sign's kind; None else
+    # The last raw reading (raw_reading): its class, the speed it gives (km/h, class_speed; 0 for a road sign), how
+    # sure, whether the limit was set from it in its frame. "" and 0 before the first.
+    self.raw_class = ""
+    self.raw_speed = 0.0
+    self.raw_confidence = 0.0
+    self.raw_taken = False
 
   def _confirmed(self, now: float, values: list) -> list:
     self._seen = [(t, value) for t, value in self._seen if now - t <= CONFIRM_SECONDS]
@@ -578,16 +622,56 @@ class SpeedLimitMemory:
     """Seconds since a motorway or expressway sign was confirmed (inf before the first): the road-type network's input."""
     return now - self._road_sign_at
 
-  def _set(self, limit: float, source: str | None) -> None:
-    self.speed_limit = limit
-    self.source = source if limit > 0 else None
+  def _set(self, limit: float, source: str | None, reason: str, taken: float | str | None = None) -> None:
+    """taken: the confirmed number (0: the end of a limit) or road sign's kind the limit is set from, None for the rules
+    that read no sign."""
+    source = source if limit > 0 else None
+    # 0 on a road whose kind is known (the road the general limit was taken from): it has none. Else nothing gives one.
+    state = "limit" if limit > 0 else "none" if self.road in IMPLICIT_LIMITS[self.country] else "unknown"
+    # The same limit of the same source and state set again by a rule that reads no sign (the scene holding a 30 zone's
+    # 30, the German motorway's none) keeps the rule that set it.
+    if taken is not None or (limit, source, state) != (self.speed_limit, self.source, self.limit_state) or \
+        not self.limit_reason:
+      self.limit_reason = reason
+    self.speed_limit, self.source, self.limit_state, self._taken = limit, source, state, taken
 
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
-             road_type: str | None = None, v_ego: float | None = None) -> float:
+             road_type: str | None = None, v_ego: float | None = None, raw: dict | None = None) -> float:
     """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
     road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking, zone30, garage,
     merge: the acceleration lane after an entry ramp), None without it;
-    v_ego: the car's speed (m/s), None when unknown (then no car park)."""
+    v_ego: the car's speed (m/s), None when unknown (then no car park);
+    raw: the frame's raw reading (raw_reading), None without one: only kept for the logs (raw_*), the limit never
+    reads it."""
+    self._taken = None
+    limit = self._update(now, readings, signs, road_type, v_ego)
+    if raw is not None:
+      speed = class_speed(raw["class"])
+      value = ROAD_SIGNS.get(raw["class"]) if speed is None else speed  # what the memory confirms of it
+      self.raw_class, self.raw_speed, self.raw_confidence = raw["class"], speed or 0.0, float(raw["confidence"])
+      self.raw_taken = self._taken is not None and self._taken == value
+    return limit
+
+  def update_frame(self, now: float, signs: list[dict], road_type: str | None = None,
+                   v_ego: float | None = None) -> float:
+    """update with a frame's signs as read_signs gives them, as speedvisiond: the ones read sure enough (MIN_CONFIDENCE)
+    are its readings and signs, the surest of all its raw reading."""
+    sure = [sign for sign in signs if sign["confidence"] >= MIN_CONFIDENCE]
+    return self.update(now, [sign["speed"] for sign in sure if sign["speed"] is not None],
+                       [sign["class"] for sign in sure], road_type=road_type, v_ego=v_ego, raw=raw_reading(signs))
+
+  def fill_log(self, message) -> None:
+    """speedVisionSP's fields for the logs (cereal/custom.capnp) on its message: what the limit says, the rule that set
+    it, the last raw reading and whether the limit was set from it."""
+    message.speedLimitState = self.limit_state
+    message.speedLimitReason = self.limit_reason
+    message.rawSignClass = self.raw_class
+    message.rawSignSpeed = self.raw_speed
+    message.rawSignConfidence = self.raw_confidence
+    message.rawSignTaken = self.raw_taken
+
+  def _update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...], road_type: str | None,
+              v_ego: float | None) -> float:
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
     confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
     numbers = [value for value in confirmed if isinstance(value, float)]
@@ -613,16 +697,16 @@ class SpeedLimitMemory:
       # before is dropped.
       if parking and (self.source != "parking" or self._park_limit(park) != self._park_limit(self._held_park)):
         self._held_park = park
-        self._set(self._park_limit(park), "parking")
+        self._set(self._park_limit(park), "parking", "car_park")
         self.road, self._ramp_limit, self._merge_since, self._number_at = None, False, None, -math.inf
       if numbers and 0 < numbers[0] < self.speed_limit:
-        self._set(numbers[0], "parking")
+        self._set(numbers[0], "parking", "sign", numbers[0])
       return self.speed_limit
 
     if road_signs:
       self.road = road_signs[0]
       if self.country not in ROAD_SIGN_KEEPS_LIMIT or self.speed_limit <= 0:
-        self._set(self._general(self.road), "sign")
+        self._set(self._general(self.road), "sign", "road_sign", self.road)
       self._ramp_limit = False
       self._number_at = -math.inf
       if self.road in CARRIAGEWAYS:
@@ -641,11 +725,11 @@ class SpeedLimitMemory:
         # The end of a limit in a 30 zone is its exit (the network still sees the zone for a few seconds): the town.
         if self.road == "zone30":
           self.road = "town"
-        self._set(self._general(self.road), "sign")
+        self._set(self._general(self.road), "sign", "end_sign", value)
         self._ramp_limit = False
         self._number_at = -math.inf
       else:
-        self._set(value, "sign")
+        self._set(value, "sign", "sign", value)
         off = road_type is not None and road_type not in CARRIAGEWAYS and road_type != "merge"
         self._number_at = now if off else -math.inf
         near = now - self._road_sign_at <= RAMP_SECONDS and self._joined_at < self._road_sign_at
@@ -657,7 +741,7 @@ class SpeedLimitMemory:
     if road_type in CARRIAGEWAYS and not road_signs and self._number_at > -math.inf and \
         self._road_type_since - self._number_at >= CARRIAGEWAY_LAG and now - self._road_type_since >= ROAD_TYPE_SECONDS:
       self.road = road_type
-      self._set(self._general(road_type), "sign")  # the carriageway's own limit: until the next sign
+      self._set(self._general(road_type), "sign", "carriageway")  # the carriageway's own limit: until the next sign
       self._ramp_limit, self._merge_since, self._number_at = False, None, -math.inf
       self._joined_at = now
       return self.speed_limit
@@ -666,11 +750,11 @@ class SpeedLimitMemory:
     # (also where it has none: the motorway in Germany, 0); a limit of the scene follows a new road type held long enough.
     if road_type in ROAD_KINDS and not self._ramp_limit and not road_signs and (
         self.source in (None, "parking") or self.source == "road" and now - self._road_type_since >= ROAD_TYPE_SECONDS):
-      self._set(self._general(road_type), "road")
+      self._set(self._general(road_type), "road", "road_type")
       return self.speed_limit
     if road_type == "zone30" and self.source == "sign" and not self._ramp_limit and \
         self.speed_limit == self._general("town") and now - max(self._road_type_since, self._sign_at) >= ROAD_TYPE_SECONDS:
-      self._set(ZONE_LIMIT, "road")
+      self._set(ZONE_LIMIT, "road", "zone30")
       return self.speed_limit
 
     if self._ramp_limit:
@@ -686,7 +770,7 @@ class SpeedLimitMemory:
       else:
         return self.speed_limit
       self.road = carriageway
-      self._set(self._general(carriageway), "sign")  # the road's own limit after the ramp's sign: until the next sign
+      self._set(self._general(carriageway), "sign", "ramp_end")  # the road's own limit after the ramp's sign: until the next sign
       self._ramp_limit = False
       self._number_at = -math.inf
       self._merge_since = None

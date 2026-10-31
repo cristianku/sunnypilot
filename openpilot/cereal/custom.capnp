@@ -492,6 +492,30 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   modelName @1 :Text;
   signRead @2 :Bool;  # a sign was read and confirmed in this frame (the same limit again too): the UI pulses
   roadType @3 :Text;  # what the road-type network sees (town, rural, expressway, motorway, ramp, parking, zone30, garage, merge: the acceleration lane), "" without it
+
+  # For the logs only, nothing reads them on the car (speed_limits/vision.py: LIMIT_STATES, LIMIT_REASONS, raw_reading).
+  # What speedLimit says: "limit" (it is the limit), "none" (the road's kind is known and has no general limit: the
+  # German motorway), "unknown" (nothing gives one: the start of a drive, the end of a limit on a road of unknown
+  # kind). speedLimit is 0 unless "limit".
+  speedLimitState @4 :Text;
+  # The rule that set the limit held, kept while a rule that reads no sign only sets the same limit and state again
+  # (there is no timeout: the limit holds until a rule sets another): "sign" (a number confirmed), "end_sign" (the end
+  # of a limit: the road's general limit), "road_sign" (a motorway, expressway or town sign or its end: its general
+  # limit), "ramp_end" (the ramp's limit ended on the acceleration lane or the carriageway), "carriageway" (a number read
+  # off the carriageways ended on one), "car_park" (a car park seen: the release's garage limit, or its car park limit
+  # in the open when the road-type network tells a garage from it), "road_type" (the general limit of the road type
+  # seen where no sign gives one), "zone30" (a 30 zone seen lowers a town's 50 held from a sign); "" before the first.
+  speedLimitReason @5 :Text;
+  # The last sign read that the memory can take, the best of its frame at any confidence, kept until another: its class
+  # ("maximum_speed:80", "cancellation" the end of a limit, "other_sign:motorway_start" a road sign...), "" before the
+  # first; the speed it gives (km/h: its number, 0 for the end of a limit or a road sign); the classifier's probability
+  # (0..1; under the release's min_confidence the memory drops it); whether the limit was set from it in its frame
+  # (confirmed and not overruled: a higher number in a car park, another sign of the frame, a road sign where it keeps
+  # the limit held).
+  rawSignClass @6 :Text;
+  rawSignSpeed @7 :Float32;
+  rawSignConfidence @8 :Float32;
+  rawSignTaken @9 :Bool;
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

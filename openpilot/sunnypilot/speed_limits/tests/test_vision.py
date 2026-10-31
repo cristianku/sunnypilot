@@ -567,3 +567,137 @@ def test_settings_change_the_memory(monkeypatch):
   vision.apply_settings({"confirm_frames": 1})
   memory = vision.SpeedLimitMemory()
   assert memory.update(0.0, [80]) == 80
+
+
+def test_memory_says_which_rule_set_the_limit():
+  memory = vision.SpeedLimitMemory()
+  assert (memory.limit_reason, memory.limit_state) == ("", "unknown")
+  assert memory.update(0.0, [], road_type="town") == 50 and (memory.limit_reason, memory.limit_state) == ("road_type", "limit")
+  assert confirm(memory, 5.0, [30], road_type="town") == 30 and memory.limit_reason == "sign"
+  assert confirm(memory, 9.0, [0], road_type="town") == 50 and memory.limit_reason == "end_sign"
+  assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == 80 and memory.limit_reason == "road_sign"
+  assert drive(memory, 21.0, 300.0) == 80 and memory.limit_reason == "road_sign"  # no timeout: it holds
+  assert confirm(memory, 300.0, [80]) == 80 and memory.limit_reason == "sign"  # the same limit, from a sign now
+
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:expressway_start"])
+  assert confirm(memory, 10.0, [60], road_type="ramp") == 60 and memory.limit_reason == "sign"
+  assert memory.update(20.0, [], road_type="merge") == 100 and memory.limit_reason == "ramp_end"
+
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, [60], road_type="rural")
+  drive(memory, 1.0, 20.0, road_type="rural")
+  assert drive(memory, 20.0, 31.0, road_type="motorway") == 120 and memory.limit_reason == "carriageway"
+
+  memory = vision.SpeedLimitMemory()
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT and memory.limit_reason == "car_park"
+  assert confirm(memory, 10.0, [5], road_type="parking", v_ego=2.0) == 5 and memory.limit_reason == "sign"
+  assert drive(memory, 12.0, 20.0, road_type="town", v_ego=6.0) == 50 and memory.limit_reason == "road_type"
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, [vision.GARAGE_LIMIT], road_type="town") == vision.GARAGE_LIMIT
+  # The same limit from a car park: its rule now.
+  assert drive(memory, 1.0, 8.0, road_type="garage", v_ego=2.0) == vision.GARAGE_LIMIT and memory.source == "parking"
+  assert memory.limit_reason == "car_park"
+
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, [50], road_type="town")
+  assert drive(memory, 1.0, 12.0, road_type="zone30") == 30 and memory.limit_reason == "zone30"
+  assert drive(memory, 12.0, 30.0, road_type="zone30") == 30 and memory.limit_reason == "zone30"  # the scene holds it
+
+
+def test_memory_tells_no_limit_from_an_unknown_one():
+  memory = vision.SpeedLimitMemory("DE")
+  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == 0
+  assert (memory.limit_reason, memory.limit_state) == ("road_sign", "none")  # the motorway in Germany: no limit
+  assert confirm(memory, 5.0, [120]) == 120 and memory.limit_state == "limit"
+  assert confirm(memory, 10.0, [0]) == 0 and (memory.limit_reason, memory.limit_state) == ("end_sign", "none")
+  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, road_type="motorway") == 0
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, [80]) == 80
+  # The end of a limit on a road of unknown kind: its general limit is not known.
+  assert confirm(memory, 5.0, [0]) == 0 and (memory.limit_reason, memory.limit_state) == ("end_sign", "unknown")
+  assert drive(memory, 6.0, 10.0, road_type="ramp") == 0 and memory.limit_state == "unknown"
+  memory = vision.SpeedLimitMemory("DE")
+  confirm(memory, 0.0, [60], road_type="ramp")
+  assert confirm(memory, 5.0, [0], road_type="ramp") == 0
+  assert (memory.limit_reason, memory.limit_state) == ("end_sign", "unknown")
+  # Then the road type says the road has none: its rule, not the end sign's.
+  assert drive(memory, 6.0, 8.0, road_type="motorway") == 0
+  assert (memory.limit_reason, memory.limit_state) == ("road_type", "none")
+
+
+def test_memory_reason_and_state_on_a_drive():
+  """Step by step, a reason of the vocabulary and the state "limit" exactly when there is a limit."""
+  memory = vision.SpeedLimitMemory("DE")
+  steps = [((0.0, 4.0), {"road_type": "town"}), ((4.0, 6.0), {"readings": [30], "road_type": "town"}),
+           ((6.0, 20.0), {"road_type": "parking", "v_ego": 2.0}), ((20.0, 40.0), {"road_type": "rural", "v_ego": 20.0}),
+           ((40.0, 41.0), {"signs": ["other_sign:motorway_start"], "road_type": "rural"}),
+           ((41.0, 80.0), {"road_type": "motorway", "v_ego": 30.0})]
+  for (start, end), context in steps:
+    for step in range(round((end - start) * 5)):
+      memory.update(start + step * 0.2, context.get("readings", []), context.get("signs", []),
+                    road_type=context.get("road_type"), v_ego=context.get("v_ego"))
+      assert memory.limit_reason in vision.LIMIT_REASONS and memory.limit_state in vision.LIMIT_STATES
+      assert (memory.limit_state == "limit") == (memory.speed_limit > 0)
+  assert (memory.speed_limit, memory.limit_state) == (0, "none")
+
+
+def reading(name, confidence):
+  """A sign of read_signs: its class and how sure."""
+  return {"class": name, "confidence": confidence}
+
+
+def test_raw_reading_is_the_surest_sign_the_memory_can_take():
+  assert vision.raw_reading([]) is None
+  assert vision.raw_reading([reading("not_a_sign", 0.99), reading("other_sign:give_way", 0.9),
+                             reading("maximum_speed:unknown", 0.95), reading("unreadable", 0.8)]) is None
+  signs = [reading("maximum_speed:80", 0.5), reading("not_a_sign", 0.99), reading("other_sign:town_entry", 0.6),
+           reading("cancellation", 0.55)]
+  assert vision.raw_reading(signs) == reading("other_sign:town_entry", 0.6)  # under MIN_CONFIDENCE too
+  assert vision.raw_reading(signs[:2] + signs[3:]) == reading("cancellation", 0.55)
+
+
+def raw(memory):
+  return memory.raw_class, memory.raw_speed, round(memory.raw_confidence, 2), memory.raw_taken
+
+
+def test_memory_keeps_the_last_raw_reading_and_whether_it_took_it():
+  memory = vision.SpeedLimitMemory()
+  assert raw(memory) == ("", 0.0, 0.0, False)
+  unsure = reading("maximum_speed:30", 0.6)  # under MIN_CONFIDENCE: not among the readings
+  assert memory.update(0.0, [], raw=unsure) == 0 and memory.update(0.2, [], raw=unsure) == 0
+  assert raw(memory) == ("maximum_speed:30", 30.0, 0.6, False)
+  # One frame is not enough: taken in the frame that confirms it, then kept until another reading.
+  assert memory.update(1.0, [80], raw=reading("maximum_speed:80", 0.9)) == 0
+  assert raw(memory) == ("maximum_speed:80", 80.0, 0.9, False)
+  assert memory.update(1.2, [80], raw=reading("maximum_speed:80", 0.95)) == 80 and raw(memory)[3]
+  assert drive(memory, 1.4, 3.0) == 80 and raw(memory) == ("maximum_speed:80", 80.0, 0.95, True)
+  memory.update(3.2, [], raw=reading("maximum_speed:80", 0.6))  # read again, unsure: the limit held is not from it
+  assert raw(memory) == ("maximum_speed:80", 80.0, 0.6, False)
+  memory.update(5.0, [0], raw=reading("cancellation", 0.9))
+  assert memory.update(5.2, [0], raw=reading("cancellation", 0.92)) == 0 and raw(memory) == ("cancellation", 0.0, 0.92, True)
+  town = reading("other_sign:town_entry", 0.85)
+  memory.update(8.0, [], ["other_sign:town_entry"], raw=town)
+  assert memory.update(8.2, [], ["other_sign:town_entry"], raw=town) == 50
+  assert raw(memory) == ("other_sign:town_entry", 0.0, 0.85, True)  # a road sign gives no speed
+  # Two at once: the limit is the lower, the surer one read is not taken.
+  memory.update(10.0, [80, 60], raw=reading("maximum_speed:80", 0.97))
+  assert memory.update(10.2, [80, 60], raw=reading("maximum_speed:80", 0.97)) == 60 and not memory.raw_taken
+
+
+def test_memory_a_raw_reading_confirmed_but_overruled_is_not_taken():
+  memory = vision.SpeedLimitMemory()
+  drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0)
+  higher = reading("maximum_speed:30", 0.9)
+  memory.update(10.0, [30], road_type="parking", v_ego=2.0, raw=higher)
+  assert memory.update(10.2, [30], road_type="parking", v_ego=2.0, raw=higher) == vision.GARAGE_LIMIT
+  assert memory.sign_read and raw(memory) == ("maximum_speed:30", 30.0, 0.9, False)  # higher than the car park's
+  lower = reading("maximum_speed:5", 0.9)
+  memory.update(12.0, [5], road_type="parking", v_ego=2.0, raw=lower)
+  assert memory.update(12.2, [5], road_type="parking", v_ego=2.0, raw=lower) == 5
+  assert raw(memory) == ("maximum_speed:5", 5.0, 0.9, True) and memory.limit_reason == "sign"  # lower: it is taken
+  memory = vision.SpeedLimitMemory("SE")
+  confirm(memory, 0.0, [90])
+  end = reading("other_sign:motorway_end", 0.9)
+  memory.update(5.0, [], ["other_sign:motorway_end"], raw=end)
+  assert memory.update(5.2, [], ["other_sign:motorway_end"], raw=end) == 90 and not memory.raw_taken  # it keeps the 90
