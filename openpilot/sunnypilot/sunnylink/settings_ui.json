@@ -861,6 +861,19 @@
                   ]
                 },
                 {
+                  "key": "SpeedLimitSetSpeedEngageOnly",
+                  "widget": "toggle",
+                  "title": "Set Speed Only Engages",
+                  "description": "The car drives at the speed limit it knows, also above the set speed. The set speed only engages, and is the speed while no limit is known. Curves still slow the car down.",
+                  "visibility": [
+                    {
+                      "type": "param",
+                      "key": "SpeedLimitMode",
+                      "equals": 3
+                    }
+                  ]
+                },
+                {
                   "key": "SpeedLimitPolicy",
                   "widget": "multiple_button",
                   "title": "Speed Limit Source",

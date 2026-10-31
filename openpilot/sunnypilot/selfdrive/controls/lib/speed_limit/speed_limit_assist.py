@@ -63,6 +63,7 @@ class SpeedLimitAssist:
     self.is_metric = self.params.get_bool("IsMetric")
     set_speed_limit_assist_availability(self.CP, self.CP_SP, self.params)
     self.enabled = self.params.get("SpeedLimitMode", return_default=True) == Mode.assist
+    self.set_speed_engage_only = self.params.get_bool("SpeedLimitSetSpeedEngageOnly")
     self.long_enabled = False
     self.long_enabled_prev = False
     self.is_enabled = False
@@ -145,6 +146,7 @@ class SpeedLimitAssist:
       self.is_metric = self.params.get_bool("IsMetric")
       set_speed_limit_assist_availability(self.CP, self.CP_SP, self.params)
       self.enabled = self.params.get("SpeedLimitMode", return_default=True) == Mode.assist
+      self.set_speed_engage_only = self.params.get_bool("SpeedLimitSetSpeedEngageOnly")
 
   def update_buttons(self, release_toggle: int) -> None:
     released = self._release_toggle_prev ^ release_toggle
