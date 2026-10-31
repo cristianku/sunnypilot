@@ -82,6 +82,7 @@ ROAD_SIGNS = {
 # limit of the ramp: it ends where the acceleration lane starts, at the end of the entry ramp, when the road-type network
 # (which remembers the ramp) says "merge" and the carriageway is known from its sign; else when it sees the carriageway
 # (MERGE_SECONDS of "merge", "motorway" or "expressway" in a row). Without the network it holds until the next sign.
+# Once on the acceleration lane, or past a ramp's limit, a number is the carriageway's, however near its sign.
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8.0
 
@@ -505,7 +506,8 @@ class SpeedLimitMemory:
   the map is another source, which the speed-limit resolver weighs against this one.
 
   The limit of a ramp ends on the main carriageway, where no sign ends it: a number read on a ramp or within
-  RAMP_SECONDS of a motorway or expressway sign is taken as the ramp's, and from the acceleration lane (the road-type
+  RAMP_SECONDS of a motorway or expressway sign (not on an acceleration lane or past one since that sign: there it is
+  the carriageway's) is taken as the ramp's, and from the acceleration lane (the road-type
   network's merge, the carriageway known from its sign) or once the network sees the carriageway the general limit of
   the road comes back, so the car can speed up to join the traffic.
 
@@ -523,6 +525,7 @@ class SpeedLimitMemory:
     self._ramp_limit = False  # the limit held is a ramp's
     self._road_sign_kind: str | None = None  # motorway or expressway: the last of their signs confirmed
     self._ramp_road: str | None = None  # the carriageway the ramp joins, known from its sign; None: not known
+    self._joined_at = -math.inf  # when the car was last on an acceleration lane or past a ramp's limit
     self._merge_since: float | None = None
     self.sign_read = False  # a number or a road sign was confirmed in the last update (the limit held again too)
     # What gives the limit held: "sign", "road" (the road type seen), "parking", None (no limit).
@@ -579,7 +582,11 @@ class SpeedLimitMemory:
     if confirmed:
       self._sign_at = now
     if road_type != self._road_type:
-      self._road_type, self._road_type_since = road_type, now
+      if not (self._road_type == "merge" and road_type in CARRIAGEWAYS):
+        self._road_type_since = now  # the lane is the carriageway's first metres: its time counts for it
+      self._road_type = road_type
+    if road_type == "merge":
+      self._joined_at = now
     slow = v_ego is not None and v_ego < PARKING_MAX_SPEED
     park = road_type if road_type in CAR_PARKS and slow else None
     if park != self._park:
@@ -605,8 +612,14 @@ class SpeedLimitMemory:
       self._ramp_limit = False
       if self.road in CARRIAGEWAYS:
         self._road_sign_at, self._road_sign_kind = now, self.road
+      else:
+        self._road_sign_kind = None  # its carriageway has ended (its end sign, a town)
     if road_type in ROAD_KINDS and not road_signs:
       self.road = road_type
+      if road_type in CARRIAGEWAYS and now - max(self._road_type_since, self._road_sign_at) >= ROAD_TYPE_SECONDS:
+        # On a carriageway for a while since its sign: a later ramp may join the other kind. Not in the first seconds,
+        # when the road type is still the one of before the sign (the debounce; an expressway's link to a motorway).
+        self._road_sign_kind = None
     if numbers:
       value = numbers[0]
       if value == 0:
@@ -617,7 +630,7 @@ class SpeedLimitMemory:
         self._ramp_limit = False
       else:
         self._set(value, "sign")
-        near = now - self._road_sign_at <= RAMP_SECONDS
+        near = now - self._road_sign_at <= RAMP_SECONDS and self._joined_at < self._road_sign_at
         self._ramp_limit = road_type == "ramp" or near
         self._ramp_road = self._road_sign_kind if near else None
       self._merge_since = None
@@ -650,4 +663,5 @@ class SpeedLimitMemory:
       self._set(self._general(carriageway), "sign")  # the road's own limit after the ramp's sign: until the next sign
       self._ramp_limit = False
       self._merge_since = None
+      self._joined_at = now
     return self.speed_limit

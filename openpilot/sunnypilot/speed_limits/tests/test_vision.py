@@ -235,6 +235,73 @@ def test_memory_acceleration_lane_without_a_ramp_limit_changes_nothing():
     assert memory.update(float(t), [], road_type="merge") == 80  # another entry joins the motorway here
 
 
+def test_memory_a_limit_read_on_the_acceleration_lane_is_the_carriageways():
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  assert confirm(memory, 8.0, [60], road_type="ramp") == 60
+  assert memory.update(20.0, [], road_type="merge") == 120
+  assert confirm(memory, 25.0, [100], road_type="merge") == 100  # the motorway's own 100, beside the lane
+  for t in range(26, 70):
+    assert memory.update(float(t), [], road_type="merge" if t < 30 else "motorway") == 100
+
+
+
+def test_memory_a_limit_read_on_the_lane_without_a_ramps_number_is_the_carriageways():
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  for t in range(1, 20):
+    memory.update(float(t), [], road_type="ramp")  # no number on the ramp
+  memory.update(20.0, [], road_type="merge")
+  assert confirm(memory, 22.0, [100], road_type="merge") == 100
+  for t in range(23, 60):
+    assert memory.update(float(t), [], road_type="merge" if t < 30 else "motorway") == 100
+
+
+def test_memory_an_expressways_link_to_the_motorway_ends_its_limit_on_the_lane():
+  memory = vision.SpeedLimitMemory()
+  for t in range(0, 10):
+    memory.update(float(t), [], road_type="expressway")
+  confirm(memory, 10.0, signs=["other_sign:motorway_start"])
+  for t in range(11, 13):
+    memory.update(float(t), [], road_type="expressway")  # the debounce: still the road before the sign
+  assert confirm(memory, 14.0, [80], road_type="ramp") == 80
+  for t in range(15, 30):
+    assert memory.update(float(t), [], road_type="ramp") == 80
+  assert memory.update(30.0, [], road_type="merge") == 120 and memory.road == "motorway"
+
+def test_memory_a_limit_read_past_a_ramps_limit_is_the_carriageways():
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  assert confirm(memory, 8.0, [60], road_type="ramp") == 60
+  for t in range(20, 28):
+    memory.update(float(t), [], road_type="motorway")  # a network without the lane
+  assert memory.update(28.0, [], road_type="motorway") == 120
+  assert confirm(memory, 35.0, [100], road_type="motorway") == 100  # 35 s after the sign, but on the carriageway
+  for t in range(36, 80):
+    assert memory.update(float(t), [], road_type="motorway") == 100
+
+
+def test_memory_a_ramp_off_the_motorway_does_not_take_its_limit_to_an_expressway():
+  memory = vision.SpeedLimitMemory()
+  confirm(memory, 0.0, signs=["other_sign:motorway_start"])
+  for t in range(1, 20):
+    memory.update(float(t), [], road_type="motorway")
+  assert confirm(memory, 20.0, [80], road_type="ramp") == 80  # a link to an expressway, 20 s after the sign
+  assert memory.update(30.0, [], road_type="merge") == 80  # which carriageway it joins: not known
+  for t in range(31, 38):
+    assert memory.update(float(t), [], road_type="expressway") == 80
+  assert memory.update(38.0, [], road_type="expressway") == 100 and memory.road == "expressway"
+
+
+def test_memory_the_acceleration_lane_counts_for_the_carriageways_scene_limit():
+  memory = vision.SpeedLimitMemory()
+  assert drive(memory, 0.0, 12.0, road_type="rural") == 80
+  drive(memory, 12.0, 20.0, road_type="ramp")
+  assert drive(memory, 20.0, 26.0, road_type="merge") == 80
+  assert drive(memory, 26.0, 29.0, road_type="motorway") == 80
+  assert drive(memory, 29.0, 30.4, road_type="motorway") == 120  # ROAD_TYPE_SECONDS from the lane's start
+
+
 def test_memory_ramp_limit_holds_without_the_network():
   memory = vision.SpeedLimitMemory()
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
