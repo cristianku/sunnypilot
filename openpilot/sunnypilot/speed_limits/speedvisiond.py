@@ -13,7 +13,7 @@ the acceleration lane, or once the car is on the carriageway (vision.SpeedLimitM
 whole frame with the car's speed, steering, blinkers and yaw (carState, deviceMotion): where no sign gives the limit
 the scene does (a garage 10, a car park in the open 20, out of it the street's general limit, a town 50). IT NEVER
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
-Limit is on or Speed Limit Source is Map Data + Vision. For the logs, each message also says what the limit says
+Limit is on or Speed Limit Source is Map Data + Vision or Vision Only. For the logs, each message also says what the limit says
 (speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
 While a round sign (a number, the end of a limit) or a motorway or expressway sign or its end is ahead, the distance
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for

@@ -189,9 +189,11 @@ class UIStateSP:
     # Set Speed Only Engages (Alpha), only with Assist: the car drives to the limit, the set speed just engages.
     self.speed_limit_auto_speed = (self.params.get_bool("SpeedLimitSetSpeedEngageOnly") and
                                    self.speed_limit_mode == Mode.assist)
-    # Map Data + Vision uses the network's limit, so it shows it too: one choice in Speed Limit Source is enough.
+    # Map Data + Vision and Vision Only use the network's limit, so they show it too: one choice in Speed Limit Source
+    # is enough.
     self.speed_limit_vision_display = (self.params.get_bool("SpeedLimitVisionDisplay") or
-                                       self.params.get("SpeedLimitPolicy", return_default=True) == Policy.map_data_vision)
+                                       self.params.get("SpeedLimitPolicy", return_default=True) in
+                                       (Policy.map_data_vision, Policy.vision_only))
     self.standstill_timer = self.params.get_bool("StandstillTimer")
     self.sunnylink_enabled = self.params.get_bool("SunnylinkEnabled")
     self.torque_bar = self.params.get_bool("TorqueBar")

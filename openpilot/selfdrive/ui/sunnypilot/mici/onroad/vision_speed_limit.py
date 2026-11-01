@@ -50,12 +50,12 @@ FINAL = rl.Color(0, 0, 0, 140)  # see-through black, the white limit and its bor
 
 class VisionSpeedLimit(Widget):
   """The speed limit read by the speed-limits neural network (speedVisionSP), drawn in the bottom left corner when
-  Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision: a fuchsia square with an eye and the limit
-  in white, always visible (alerts are drawn at the top). The drawing does not change the speed. A dark square with a
-  dash means no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read,
-  even one that gives the limit already shown. In the bottom right corner the final limit, the network's weighed with
-  the map and the car by the resolver, grey while only its last one holds; above it the kind of road the network
-  sees. While the network sees a round sign or a motorway sign or its end ahead, the distance to it replaces the eye."""
+  Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision or Vision Only: a fuchsia square with an
+  eye and the limit in white, always visible (alerts are drawn at the top). The drawing does not change the speed. A
+  dark square with a dash means no reading: the network is not sure, or speedvisiond is not running. It pulses each
+  time a sign is read, even one that gives the limit already shown. In the bottom right corner the final limit, the
+  network's weighed with the map and the car by the resolver, grey while only its last one holds; above it the kind
+  of road the network sees. While the network sees a round sign or a motorway sign or its end ahead, the distance to it replaces the eye."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)

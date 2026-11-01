@@ -15,6 +15,7 @@ class Policy(IntEnumBase):
   map_data_priority = 3
   combined = 4
   map_data_vision = 5  # the speed-limits neural network's limit (speedVisionSP) when it has one, else the map
+  vision_only = 6  # only the speed-limits neural network's limit (speedVisionSP): no limit when it has none
 
 
 class OffsetType(IntEnumBase):

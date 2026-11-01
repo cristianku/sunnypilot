@@ -123,7 +123,7 @@ sections:
     title: Show Vision Speed Limit
     description: Show the speed limit the neural network reads from the road camera, in a fuchsia square in the
       bottom left corner of the driving screen. Information only, it does not change the speed. A grey ring means no
-      reading. Always shown when Speed Limit Source is Map Data + Vision.
+      reading. Always shown when Speed Limit Source is Map Data + Vision or Vision Only.
     visibility:
     - {type: capability, field: device_type, equals: mici}
   sub_panels:
@@ -194,6 +194,8 @@ sections:
         label: Combined
       - value: 5
         label: Map Data + Vision
+      - value: 6
+        label: Vision Only
     - key: SpeedLimitOffsetType
       widget: multiple_button
       title: Speed Limit Offset Type

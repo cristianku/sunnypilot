@@ -196,6 +196,10 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     # Map Data + Vision does not use the car's own limit.
     (Policy.map_data_vision, 30., 0., 25., 25., SpeedLimitSource.map),
     (Policy.map_data_vision, 30., 22., 25., 22., SpeedLimitSource.vision),
+    # Vision Only: the network's limit, never the map or the car, and no limit when the network has none.
+    (Policy.vision_only, 0., 22., 25., 22., SpeedLimitSource.vision),
+    (Policy.vision_only, 30., 0., 25., 0., SpeedLimitSource.none),
+    (Policy.vision_only, 0., 0., 0., 0., SpeedLimitSource.none),
     # The other policies ignore the network, as before.
     (Policy.car_state_priority, 0., 22., 25., 25., SpeedLimitSource.map),
     (Policy.car_state_only, 0., 22., 25., 0., SpeedLimitSource.none),

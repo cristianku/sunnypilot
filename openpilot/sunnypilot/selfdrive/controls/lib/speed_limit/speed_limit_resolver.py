@@ -55,6 +55,7 @@ class SpeedLimitResolver:
       Policy.map_data_priority: [SpeedLimitSource.map, SpeedLimitSource.car],
       Policy.combined: [SpeedLimitSource.car, SpeedLimitSource.map],
       Policy.map_data_vision: [SpeedLimitSource.vision, SpeedLimitSource.map],
+      Policy.vision_only: [SpeedLimitSource.vision],
     }
     self.source = SpeedLimitSource.none
     for source in ALL_SOURCES:
@@ -118,7 +119,7 @@ class SpeedLimitResolver:
 
   def _get_from_vision(self, sm: messaging.SubMaster) -> None:
     """The limit of the speed-limits neural network (speedVisionSP): 0 when it is not sure or speedvisiond is not
-    running (a stale message is never used). Only the policy Map Data + Vision takes it."""
+    running (a stale message is never used). Only the policies Map Data + Vision and Vision Only take it."""
     self._reset_limit_sources(SpeedLimitSource.vision)
     try:
       alive = sm.alive['speedVisionSP']
