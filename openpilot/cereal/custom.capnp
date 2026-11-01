@@ -517,10 +517,12 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   rawSignConfidence @8 :Float32;
   rawSignTaken @9 :Bool;
 
-  # The distance (m) to the round sign ahead (a number, the end of a limit; the largest of the frame), from its size on
-  # the camera and the metres driven since (speed_limits/vision.py: SignDistance): the screen shows it for the driver to
-  # check, nothing else reads it on the car; 0 without one, once the car has passed it, or 15 s after it was last seen.
-  # signSize: the side (frame pixels, the box's larger) of that sign in this frame, 0 when none is seen in it.
+  # The distance (m) to the sign ahead (a number, the end of a limit, a motorway or expressway sign or its end; the
+  # nearest of the frame by its size), from its size on the camera and the metres driven since (speed_limits/vision.py:
+  # SignDistance): the screen shows it for the driver to check, nothing else reads it on the car; 0 without one, once
+  # the car has passed it, or 15 s after it was last seen.
+  # signSize: the side (frame pixels: a round sign's larger, a road sign's height) of that sign in this frame, 0 when
+  # none is seen in it.
   signDistance @10 :Float32;
   signSize @11 :Float32;
 }

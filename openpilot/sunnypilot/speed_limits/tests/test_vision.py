@@ -751,12 +751,32 @@ def test_sign_distance_takes_the_size_of_the_road_kind():
                    pytest.approx(next(true for true, _ in motorway if true < 60), abs=0.01)]
 
 
-def test_sign_distance_reads_only_round_signs_read_sure_enough():
-  for name, confidence in (("road_marking:50", 0.9), ("variable_display:80", 0.9), ("other_sign:motorway_start", 0.9),
-                           ("maximum_speed:80", 0.5)):
+def test_sign_distance_reads_only_round_and_road_signs_read_sure_enough():
+  for name, confidence in (("road_marking:50", 0.9), ("variable_display:80", 0.9), ("other_sign:town_entry", 0.9),
+                           ("maximum_speed:80", 0.5), ("other_sign:motorway_end", 0.5)):
     shown = approach(lambda d, name=name, confidence=confidence: [sign_at(d, name=name, confidence=confidence)])
     assert all(estimate == 0 for _, estimate in shown)
   assert approach(lambda d: [sign_at(d, name="cancellation")])[0][1] == pytest.approx(90, abs=0.01)
+
+
+def test_sign_distance_to_a_motorway_sign_or_its_end_from_its_height():
+  for name in vision.ROAD_SIGN_HEIGHTS:
+    height = vision.ROAD_SIGN_HEIGHTS[name]
+    shown = approach(lambda d, name=name, height=height: [sign_at(d, height, name)] if d > 15 else [], road="motorway")
+    assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 0)
+  # Its formats differ (a post's, a gantry's): first seen at the usual height, corrected as it grows.
+  for height in (1.3, 2.1):
+    shown = [(true, estimate) for true, estimate in
+             approach(lambda d, height=height: [sign_at(d, height, "other_sign:motorway_end")] if 15 < d < 85 else [])
+             if 15 < true < 85]
+    assert shown[0][1] == pytest.approx(shown[0][0] * 1.7 / height, rel=0.01)
+    assert shown[-1][1] == pytest.approx(shown[-1][0], abs=2.0)
+
+
+def test_sign_distance_takes_the_nearest_by_its_size_not_the_largest():
+  # A round 80 at d and the end of the motorway 20 m farther on, larger on the camera: the 80 is the nearer.
+  shown = approach(lambda d: [sign_at(d + 20, 1.7, "other_sign:motorway_end"), sign_at(d)] if d > 15 else [])
+  assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 15)
 
 
 def test_sign_distance_takes_the_nearest_sign_and_starts_again_on_another():

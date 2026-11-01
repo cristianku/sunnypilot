@@ -55,7 +55,7 @@ class VisionSpeedLimit(Widget):
   dash means no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read,
   even one that gives the limit already shown. In the bottom right corner the final limit, the network's weighed with
   the map and the car by the resolver, grey while only its last one holds; above it the kind of road the network
-  sees. While the network sees a round sign ahead, the distance to it replaces the eye."""
+  sees. While the network sees a round sign or a motorway sign or its end ahead, the distance to it replaces the eye."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
@@ -114,7 +114,7 @@ class VisionSpeedLimit(Widget):
     rl.draw_rectangle_rounded(box, ROUNDNESS, SEGMENTS, FUCHSIA if has_limit else DARK_GREY)
     rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, FUCHSIA_LIGHT if has_limit else FUCHSIA)
 
-    # While a round sign is ahead, the distance to it (speedVisionSP.signDistance, from its size on the camera) takes
+    # While a sign is ahead, the distance to it (speedVisionSP.signDistance, from its size on the camera) takes
     # the eye's place, as small as the source, for the driver to check: m, ft without metric units.
     if self._distance:
       size = measure_text_cached(self._font, self._distance, SOURCE_FONT_SIZE)
