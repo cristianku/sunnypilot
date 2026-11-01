@@ -78,6 +78,10 @@ ROAD_SIGNS = {
   "other_sign:town_entry": "town",
   "other_sign:town_exit": "rural",
 }
+# The green boards towards a motorway or an expressway (in Switzerland where the entry ramp starts, and at the
+# interchanges): a carriageway is near, never its limit (the ramp has its own). Confirmed as the other signs are, they
+# only give the road-type network its input board (board_age): the limit, the road and the ramp never read them.
+BOARD_SIGNS = ("other_sign:motorway_direction",)
 # A number read on a ramp (the road-type network says so) or within RAMP_SECONDS of a motorway or expressway sign is the
 # limit of the ramp: it ends where the acceleration lane starts, at the end of the entry ramp, when the road-type network
 # (which remembers the ramp) says "merge" and the carriageway is known from its sign; else when it sees the carriageway
@@ -430,9 +434,16 @@ class CarMotion:
     return motion
 
 
+def age_input(age: float) -> np.ndarray:
+  """The road-type network's input for a sign or a board confirmed age seconds ago: [age / 60, 1] up to SIGN_AGE_MAX,
+  [2, 0] longer ago or never."""
+  return np.array([[min(age, SIGN_AGE_MAX) / 60.0, 1.0]] if age <= SIGN_AGE_MAX else [[2.0, 0.0]], dtype=np.float32)
+
+
 class RoadTypeReader:
   """The road-type network step by step (one step every ROAD_TYPE_PERIOD): the frame, the speed, how long ago a
-  motorway or expressway sign was confirmed and the car's motion in, the probabilities out; each memory output
+  motorway or expressway sign was confirmed, the car's motion and, for a network with the input board, how long ago a
+  green board towards a motorway was confirmed (BOARD_SIGNS) in, the probabilities out; each memory output
   (<name>_out) goes back as the input <name> of the next step. road_type is the class once ROAD_TYPE_DEBOUNCE steps in a
   row agree, None before; zone30 only at ZONE_CONFIDENCE, else town. The junction output is not used: it is not good
   enough yet."""
@@ -449,14 +460,13 @@ class RoadTypeReader:
     return now - self.last_step >= ROAD_TYPE_PERIOD
 
   def step(self, now: float, y: np.ndarray, uv: np.ndarray, v_ego: float | None, sign_age: float,
-           motion: np.ndarray) -> str | None:
+           motion: np.ndarray, board_age: float = math.inf) -> str | None:
     if now - self.last_step > ROAD_TYPE_RESET_SECONDS:
       self.memory, self.answers, self.road_type = {}, [], None
     self.last_step = now
     speed = [[min(max(v_ego, 0.0), 60.0) / 30.0, 1.0]] if v_ego is not None else [[0.0, 0.0]]
-    sign = [[min(sign_age, SIGN_AGE_MAX) / 60.0, 1.0]] if sign_age <= SIGN_AGE_MAX else [[2.0, 0.0]]
-    inputs = {"image": self.image(y, uv), "speed": np.array(speed, dtype=np.float32),
-              "sign": np.array(sign, dtype=np.float32), "motion": motion}
+    inputs = {"image": self.image(y, uv), "speed": np.array(speed, dtype=np.float32), "sign": age_input(sign_age),
+              "motion": motion, "board": age_input(board_age)}
     names = self.network.input_names
     for name in names:
       if name not in inputs:  # a memory: zeros at the start
@@ -598,6 +608,7 @@ class SpeedLimitMemory:
     self.road: str | None = None  # the kind of road from the last road sign or the road-type network
     self._seen: list[tuple[float, float | str]] = []
     self._road_sign_at = -math.inf  # when the last motorway or expressway sign was confirmed
+    self._board_at = -math.inf  # when the last green board towards a motorway was confirmed (BOARD_SIGNS)
     self._ramp_limit = False  # the limit held is a ramp's
     self._road_sign_kind: str | None = None  # motorway or expressway: the last of their signs confirmed
     self._ramp_road: str | None = None  # the carriageway the ramp joins, known from its sign; None: not known
@@ -650,6 +661,11 @@ class SpeedLimitMemory:
     """Seconds since a motorway or expressway sign was confirmed (inf before the first): the road-type network's input."""
     return now - self._road_sign_at
 
+  def board_age(self, now: float) -> float:
+    """Seconds since a green board towards a motorway was confirmed (inf before the first): the road-type network's
+    input board, nothing else."""
+    return now - self._board_at
+
   def _set(self, limit: float, source: str | None, reason: str, taken: float | str | None = None) -> None:
     """taken: the confirmed number (0: the end of a limit) or road sign's kind the limit is set from, None for the rules
     that read no sign."""
@@ -701,7 +717,11 @@ class SpeedLimitMemory:
   def _update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...], road_type: str | None,
               v_ego: float | None) -> float:
     roads = [ROAD_SIGNS[name] for name in signs if name in ROAD_SIGNS]
-    confirmed = self._confirmed(now, [float(value) for value in readings] + roads)
+    boards = [name for name in signs if name in BOARD_SIGNS]
+    confirmed = self._confirmed(now, [float(value) for value in readings] + roads + boards)
+    if any(value in BOARD_SIGNS for value in confirmed):
+      self._board_at = now  # the road-type network's input only
+    confirmed = [value for value in confirmed if value not in BOARD_SIGNS]
     numbers = [value for value in confirmed if isinstance(value, float)]
     road_signs = [value for value in confirmed if isinstance(value, str)]
     self.sign_read = bool(confirmed)

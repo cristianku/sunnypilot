@@ -121,7 +121,8 @@ def main() -> None:
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
     if road_types is not None and road_types.due(now):
       # Right after SignNet, while the GPU is still free of the driving model.
-      road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now))
+      road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now),
+                       memory.board_age(now))
     road_type = road_types.road_type if road_types is not None else None
     speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
 

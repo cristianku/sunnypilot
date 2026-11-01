@@ -173,6 +173,19 @@ def test_memory_road_signs_set_the_general_limit():
   assert confirm(vision.SpeedLimitMemory("IT"), 0.0, signs=["other_sign:motorway_start"]) == 130
 
 
+def test_memory_a_green_board_is_only_the_road_type_input():
+  memory = vision.SpeedLimitMemory()
+  assert confirm(memory, 0.0, signs=["other_sign:town_exit"]) == 80
+  assert memory.update(10.0, [], ["other_sign:motorway_direction"]) == 80
+  assert memory.board_age(10.0) == float("inf")  # seen once: not confirmed
+  assert confirm(memory, 20.0, signs=["other_sign:motorway_direction"], road_type="ramp") == 80  # no 120 on the ramp
+  assert abs(memory.board_age(25.0) - 4.8) < 1e-9 and memory.road_sign_age(25.0) == float("inf")
+  assert memory.road == "rural" and not memory.sign_read and memory.limit_reason == "road_sign"
+  # With a number in the same frames, the number is the limit, and the board still counts.
+  assert confirm(memory, 30.0, [60], signs=["other_sign:motorway_direction"]) == 60 and memory.sign_read
+  assert memory.board_age(30.2) == 0.0
+
+
 def test_memory_ramp_limit_ends_by_the_road_type_network():
   memory = vision.SpeedLimitMemory()
   assert confirm(memory, 0.0, signs=["other_sign:motorway_start"], road_type="motorway") == 120
@@ -479,6 +492,27 @@ def test_road_type_reader_debounces_and_carries_its_memory():
   assert np.all(first["hidden"] == 0) and np.all(last["hidden"] == 5)  # its memory, step after step
   assert reader.step(20.0, y, uv, 10.0, 30.0, motion) is None  # a long pause: from zeros again
   assert np.all(network.calls[-1]["hidden"] == 0)
+
+
+class FakeBoardRoadType(FakeRoadType):
+  """A network with the input board."""
+  input_names = ("image", "speed", "sign", "motion", "board", "hidden")
+
+
+def test_road_type_reader_gives_the_board_to_a_network_that_has_it():
+  height, width = 76, 134
+  y, uv = nv12(np.full((height, width), 128), np.full((height // 2, width // 2), 128), np.full((height // 2, width // 2), 128))
+  motion = np.zeros((1, 8), dtype=np.float32)
+  network = FakeBoardRoadType(["town"] * 3)
+  reader = vision.RoadTypeReader(network, ["town", "rural", "expressway", "motorway", "ramp", "parking"], width, height)
+  reader.step(0.0, y, uv, 10.0, 500.0, motion, 30.0)
+  reader.step(1.0, y, uv, 10.0, 500.0, motion)
+  assert np.allclose(network.calls[0]["board"], [[0.5, 1]]) and np.allclose(network.calls[0]["sign"], [[2, 0]])
+  assert np.allclose(network.calls[1]["board"], [[2, 0]])  # never confirmed: none seen, not zeros
+  older = FakeRoadType(["town"])
+  vision.RoadTypeReader(older, ["town", "rural", "expressway", "motorway", "ramp", "parking"], width, height).step(
+    0.0, y, uv, 10.0, 500.0, motion, 30.0)
+  assert "board" not in older.calls[0]  # a network without the input does not get it
 
 
 def test_road_type_input_is_the_resized_frame():
