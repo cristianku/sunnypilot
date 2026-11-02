@@ -28,11 +28,12 @@ import numpy as np
 from msgq.visionipc import VisionIpcClient
 from openpilot.cereal import messaging
 from openpilot.cereal.visionipc import VisionStreamType
-from openpilot.common.constants import CV
 from openpilot.common.params import Params
+from openpilot.common.gps import get_gps_location_service
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.sunnypilot.speed_limits import runner, vision
+from openpilot.sunnypilot.speed_limits.country import CountryResolver, OfflineBorders, GpsFix
 
 PERIOD = 0.2  # seconds between the frames read
 NICENESS = 10  # the frame's preparation takes 100 ms on a little core: the driving processes come first
@@ -92,8 +93,14 @@ def main() -> None:
 
   pm = messaging.PubMaster(["speedVisionSP"])
   signnet_input = vision.SignNetInput(client.width, client.height)
-  # The country of the general limits: the one chosen for the maps (Settings › OSM, an ISO code), else Switzerland.
-  memory = vision.SpeedLimitMemory(Params().get("OsmLocationName") or vision.DEFAULT_COUNTRY)
+  # GPS selects only a country and sign unit. No map speed/road/junction data enters vision.
+  memory = vision.SpeedLimitMemory()
+  gps_service = get_gps_location_service(Params())
+  gps = messaging.sub_sock(gps_service, conflate=True)
+  borders = OfflineBorders.load()
+  country = CountryResolver.from_settings(borders, files.settings.get("country_policy", {}))
+  if country is None:
+    cloudlog.warning("speedvisiond: no explicit country policy/borders; numeric readings blocked")
   memory.garage_known = road_types is not None and "garage" in road_types.classes
   motion = vision.CarMotion()
   distance = vision.SignDistance(focal_length(client.width, client.height))
@@ -116,6 +123,13 @@ def main() -> None:
       continue
     next_frame = now + PERIOD
 
+    fix = None
+    for event in messaging.drain_sock(gps):
+      g = getattr(event, gps_service)
+      fix = GpsFix(event.logMonoTime * 1e-9, g.latitude, g.longitude, g.horizontalAccuracy,
+                   bool(event.valid and g.hasFix))
+    memory.set_country(country.update(now, fix) if country is not None else None)
+
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
@@ -127,7 +141,7 @@ def main() -> None:
     speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
 
     msg = messaging.new_message("speedVisionSP", valid=True)
-    msg.speedVisionSP.speedLimit = float(speed_limit * CV.KPH_TO_MS)
+    msg.speedVisionSP.speedLimit = float(speed_limit)
     msg.speedVisionSP.modelName = files.name
     msg.speedVisionSP.signRead = memory.sign_read
     msg.speedVisionSP.roadType = road_type or ""

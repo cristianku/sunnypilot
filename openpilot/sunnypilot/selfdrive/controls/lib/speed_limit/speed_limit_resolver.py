@@ -82,6 +82,11 @@ class SpeedLimitResolver:
     if self.speed_limit > 0.:
       self.speed_limit_last = self.speed_limit
       self.speed_limit_final_last = self.speed_limit_final
+    elif Policy(self.policy) in (Policy.vision_only, Policy.map_data_vision):
+      # Planner/SLA also use the last valid solution. A zero current vision limit alone cannot revoke that target.
+      # Mixed policy already selected a fresh map fallback above, if available.
+      self.speed_limit_last = 0.
+      self.speed_limit_final_last = 0.
 
   @property
   def speed_limit_valid(self) -> bool:

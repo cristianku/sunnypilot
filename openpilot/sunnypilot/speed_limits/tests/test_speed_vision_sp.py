@@ -22,7 +22,7 @@ except ImportError:  # no opendbc (cereal's import path): the file alone
   CEREAL_CUSTOM = None
 FIELDS = {"speedLimit": 0, "modelName": 1, "signRead": 2, "roadType": 3, "speedLimitState": 4, "speedLimitReason": 5,
           "rawSignClass": 6, "rawSignSpeed": 7, "rawSignConfidence": 8, "rawSignTaken": 9, "signDistance": 10,
-          "signSize": 11}
+          "signSize": 11, "rawSignValue": 12, "rawSignUnit": 13, "rawSignCountry": 14}
 # speedVisionSP before the fields for the logs: an old log's message.
 OLD = """@0xe0b6b2b0c0a1d2f3;
 struct SpeedVisionSP {
@@ -71,16 +71,16 @@ def logged(custom, memory):
 
 
 def test_the_memory_fills_the_fields(custom):
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   assert logged(custom, memory) == ("unknown", "", "", 0, 0, False)
   # An unsure read shows, though the memory drops it.
   assert memory.update_frame(0.0, [read("maximum_speed:30", 0.6), read("not_a_sign", 0.99)]) == 0
   assert memory.update_frame(0.2, [read("maximum_speed:30", 0.6)]) == 0
   assert logged(custom, memory) == ("unknown", "", "maximum_speed:30", 30, 0.6, False)
   assert memory.update_frame(1.0, [read("maximum_speed:80", 0.93)]) == 0
-  assert memory.update_frame(1.2, [read("maximum_speed:80", 0.95), read("maximum_speed:30", 0.6)]) == 80
+  assert memory.update_frame(1.2, [read("maximum_speed:80", 0.95), read("maximum_speed:30", 0.6)]) == pytest.approx(80 / 3.6)
   assert logged(custom, memory) == ("limit", "sign", "maximum_speed:80", 80, 0.95, True)
-  assert memory.update_frame(1.4, []) == 80  # no sign: the last read and whether it was taken are held
+  assert memory.update_frame(1.4, []) == pytest.approx(80 / 3.6)  # no sign: the last read and whether it was taken are held
   assert logged(custom, memory) == ("limit", "sign", "maximum_speed:80", 80, 0.95, True)
 
 

@@ -40,7 +40,8 @@ CANCELLATION = "cancellation"
 # The general limits that hold where no number is signed (km/h; None: no general limit), by country, for the kind of
 # road: in a town, outside towns, on an expressway (Autostrasse), on a motorway. From the laws of each country,
 # sunnypilot.speedlimits docs/road-rules/<cc>.md (29 Oct 2026). Where a kind's limit depends on what the camera cannot
-# tell (a single or a dual carriageway, the region), the lower one. GB is left out: its signs are in mph.
+# tell (a single or a dual carriageway, the region), the lower one. GB/US implicit rules remain unverified here;
+# support for their sign units is independent of this legal table.
 IMPLICIT_LIMITS = {
   "CH": {"town": 50, "rural": 80, "expressway": 100, "motorway": 120},
   "LI": {"town": 50, "rural": 80, "expressway": 80, "motorway": 80},
@@ -65,7 +66,7 @@ IMPLICIT_LIMITS = {
   "SI": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
   "HR": {"town": 50, "rural": 90, "expressway": 110, "motorway": 130},
 }
-DEFAULT_COUNTRY = "CH"
+DEFAULT_COUNTRY = None  # no GPS country: new numeric observations are blocked
 # Where a sign of the kind of road does not end the limit held (it holds until its end sign or the next number): it
 # only says which road the car is on.
 ROAD_SIGN_KEEPS_LIMIT = ("SE", "NO", "FI")
@@ -105,7 +106,8 @@ ROAD_TYPE_DEBOUNCE = 3
 ROAD_TYPE_RESET_SECONDS = 5.0  # longer without a step: its memory starts again from zeros
 ROAD_KINDS = ("town", "rural", "expressway", "motorway", "zone30")  # the road types with a general limit
 CARRIAGEWAYS = ("motorway", "expressway")
-# A 30 zone (the road-type network's zone30, from its next training): 30 in every country. Seen for ROAD_TYPE_SECONDS
+# A 30 zone (the road-type network's zone30): the legacy physical value is 30 km/h where implicit rules are known.
+# It never becomes 30 mph. Seen for ROAD_TYPE_SECONDS
 # after the last sign, it also lowers a town's general limit held from a sign (its gate sign missed, a 50 read on the
 # street before): the car must not speed up to 50 inside it. A higher number (60, 80) holds: the network can be wrong.
 ZONE_LIMIT = 30.0
@@ -140,6 +142,7 @@ ROAD_TYPE_SECONDS = 10.0
 # limit_reason; "" before the first), kept while a rule that reads no sign only sets the same limit and state again: a
 # limit has no timeout, it holds until one of these sets another.
 LIMIT_REASONS = (
+  "country_change",  # a confirmed jurisdiction change invalidates/re-evaluates memory
   "sign",  # a number confirmed (in a car park, one lower than its limit)
   "end_sign",  # the end of a limit confirmed: the general limit of the road whose kind is known, else 0 (unknown)
   "road_sign",  # a sign of the kind of road confirmed (ROAD_SIGNS): its general limit
@@ -542,8 +545,25 @@ def softmax(logits: np.ndarray) -> np.ndarray:
   return exp / exp.sum()
 
 
+# Unit support is independent of legal implicit defaults. No "all other countries are metric" fallback.
+METRIC_COUNTRIES = frozenset("CH LI DE AT IT FR NL BE LU ES PT IE DK SE NO FI PL CZ SK HU SI HR".split())
+MPH_COUNTRIES = frozenset({"GB", "US"})
+
+
+def sign_unit(country: str | None) -> str:
+  return "mph" if country in MPH_COUNTRIES else "km/h" if country in METRIC_COUNTRIES else "unknown"
+
+
+def sign_mps(number: float, unit: str) -> float | None:
+  if type(number) not in (int, float) or not math.isfinite(number) or number < 0:
+    return None
+  if number == 0:  # cancellation does not depend on a numeric unit
+    return 0.0
+  return number / 3.6 if unit == "km/h" else number * 0.44704 if unit == "mph" else None
+
+
 def class_speed(name: str) -> float | None:
-  """The speed (km/h) a class gives: its number for a speed sign, a variable display, a zone or a marking on the
+  """The written number a class gives (unit-free): its number for a speed sign, a variable display, a zone or a marking on the
   road; 0 for the end of a limit; None for the others (other signs, unreadable, not a sign)."""
   if name == CANCELLATION:
     return 0.0
@@ -556,7 +576,7 @@ def class_speed(name: str) -> float | None:
 def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finder, classifier,
                classes: list[str]) -> list[dict]:
   """The signs of a frame: SignNet's boxes, each read by the classifier (its class, how sure, and the speed it gives
-  when it is sure enough: km/h, 0 for the end of a limit, None for no speed). finder and classifier take the
+  when it is sure enough: written number, 0 for the end of a limit, None for no speed). finder and classifier take the
   networks' inputs and give their outputs as numpy arrays."""
   signs = signnet_boxes(finder(signnet_input(y, uv)), signnet_input.scale)
   for sign in signs:
@@ -580,8 +600,9 @@ def raw_reading(signs: list[dict]) -> dict | None:
 
 
 class SpeedLimitMemory:
-  """The limit shown (km/h, 0: none). A number becomes the limit when it is read in CONFIRM_FRAMES frames within
-  CONFIRM_SECONDS, and stays until another one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
+  """The physical limit held (m/s, 0: unavailable). New written numbers are normalized before confirmation.
+  A number becomes the limit when it is read in CONFIRM_FRAMES frames within CONFIRM_SECONDS, and stays until another
+  one is. A sign of the kind of road (ROAD_SIGNS), confirmed the same way,
   sets the general limit of that road (IMPLICIT_LIMITS of the country; where ROAD_SIGN_KEEPS_LIMIT, only when no limit
   is held); so does the end of a limit, on a road whose kind is known (else 0, no limit). The camera and the car only:
   the map is another source, which the speed-limit resolver weighs against this one.
@@ -602,11 +623,13 @@ class SpeedLimitMemory:
   For the logs, and nothing else: the rule that set the limit held (limit_reason, LIMIT_REASONS), what the limit says
   (limit_state, LIMIT_STATES) and the last raw reading given to update (raw_reading) with whether the limit was set
   from it in its frame (raw_class, raw_speed, raw_confidence, raw_taken); fill_log writes them in speedVisionSP."""
-  def __init__(self, country: str = DEFAULT_COUNTRY):
+  def __init__(self, country: str | None = DEFAULT_COUNTRY):
     self.speed_limit = 0.0
-    self.country = country if country in IMPLICIT_LIMITS else DEFAULT_COUNTRY
+    self.country = country
+    self._confirmed_country = country
+    self._explicit_number = False
     self.road: str | None = None  # the kind of road from the last road sign or the road-type network
-    self._seen: list[tuple[float, float | str]] = []
+    self._seen: list[tuple[float, float | str]] = []  # observations are physical m/s, or a nonnumeric sign kind
     self._road_sign_at = -math.inf  # when the last motorway or expressway sign was confirmed
     self._board_at = -math.inf  # when the last green board towards a motorway was confirmed (BOARD_SIGNS)
     self._ramp_limit = False  # the limit held is a ramp's
@@ -630,12 +653,37 @@ class SpeedLimitMemory:
     self.limit_reason = ""  # the rule that set the limit held (LIMIT_REASONS), "" before the first
     self.limit_state = "unknown"  # what the limit says (LIMIT_STATES)
     self._taken: float | str | None = None  # what set the limit in this update: a number, a road sign's kind; None else
-    # The last raw reading (raw_reading): its class, the speed it gives (km/h, class_speed; 0 for a road sign), how
-    # sure, whether the limit was set from it in its frame. "" and 0 before the first.
+    # The last raw reading: class, physical km/h (raw_speed, for old logs), original number/unit/country,
+    # confidence and whether it set the limit in its frame. Unknown units give raw_speed 0, never a km/h guess.
     self.raw_class = ""
     self.raw_speed = 0.0
     self.raw_confidence = 0.0
     self.raw_taken = False
+    self.raw_value = 0.0
+    self.raw_unit = "unknown"
+    self.raw_country = ""
+
+  def set_country(self, country: str | None) -> None:
+    """Only a confirmed new country invalidates memory. GPS loss blocks observations but holds m/s.
+    The last confirmed country survives GPS loss, so a later crossing cannot reuse its old memory."""
+    if country == self.country:
+      return
+    self._seen.clear()  # never confirm candidates accumulated under another unit/unknown interval
+    self.country = country
+    if country is None:
+      return
+    previous = self._confirmed_country
+    self._confirmed_country = country
+    if previous is None or previous == country:
+      return
+    parking = self.source == "parking"
+    self._ramp_limit, self._ramp_road, self._road_sign_kind = False, None, None
+    self._road_sign_at = self._board_at = self._joined_at = self._number_at = -math.inf
+    self._merge_since = None
+    self._explicit_number = False
+    if not parking:
+      # Re-evaluate legal defaults, but never reinterpret the old written number.
+      self._set(self._general(self.road), "road", "country_change")
 
   def _confirmed(self, now: float, values: list) -> list:
     self._seen = [(t, value) for t, value in self._seen if now - t <= CONFIRM_SECONDS]
@@ -650,12 +698,13 @@ class SpeedLimitMemory:
 
   def _general(self, road: str | None) -> float:
     if road == "zone30":
-      return ZONE_LIMIT
-    limit = IMPLICIT_LIMITS[self.country].get(road) if road else None
-    return float(limit or 0)
+      return ZONE_LIMIT / 3.6 if self.country in IMPLICIT_LIMITS else 0.0
+    limit = IMPLICIT_LIMITS.get(self.country, {}).get(road) if road else None
+    return float(limit or 0) / 3.6
 
   def _park_limit(self, park: str | None) -> float:
-    return PARKING_LIMIT if park == "parking" and self.garage_known else GARAGE_LIMIT
+    # Release settings and legacy constants are km/h physical values, even in mph jurisdictions.
+    return (PARKING_LIMIT if park == "parking" and self.garage_known else GARAGE_LIMIT) / 3.6
 
   def road_sign_age(self, now: float) -> float:
     """Seconds since a motorway or expressway sign was confirmed (inf before the first): the road-type network's input."""
@@ -669,9 +718,10 @@ class SpeedLimitMemory:
   def _set(self, limit: float, source: str | None, reason: str, taken: float | str | None = None) -> None:
     """taken: the confirmed number (0: the end of a limit) or road sign's kind the limit is set from, None for the rules
     that read no sign."""
+    self._explicit_number = reason == "sign" and isinstance(taken, float) and taken > 0
     source = source if limit > 0 else None
     # 0 on a road whose kind is known (the road the general limit was taken from): it has none. Else nothing gives one.
-    state = "limit" if limit > 0 else "none" if self.road in IMPLICIT_LIMITS[self.country] else "unknown"
+    state = "limit" if limit > 0 else "none" if self.road in IMPLICIT_LIMITS.get(self.country, {}) else "unknown"
     # The same limit of the same source and state set again by a rule that reads no sign (the scene holding a 30 zone's
     # 30, the German motorway's none) keeps the rule that set it.
     if taken is not None or (limit, source, state) != (self.speed_limit, self.source, self.limit_state) or \
@@ -681,18 +731,24 @@ class SpeedLimitMemory:
 
   def update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...] = (),
              road_type: str | None = None, v_ego: float | None = None, raw: dict | None = None) -> float:
-    """readings: the speeds read in this frame (class_speed); signs: the classes of the other signs read sure enough;
+    """readings: the original written numbers in this frame (class_speed), normalized here before confirmation;
+    signs: the classes of the other signs read sure enough;
     road_type: what the road-type network sees (town, rural, expressway, motorway, ramp, parking, zone30, garage,
     merge: the acceleration lane after an entry ramp), None without it;
     v_ego: the car's speed (m/s), None when unknown (then no car park);
     raw: the frame's raw reading (raw_reading), None without one: only kept for the logs (raw_*), the limit never
     reads it."""
     self._taken = None
-    limit = self._update(now, readings, signs, road_type, v_ego)
+    normalized = [speed for value in readings if (speed := sign_mps(value, sign_unit(self.country))) is not None]
+    limit = self._update(now, normalized, signs, road_type, v_ego)
     if raw is not None:
       speed = class_speed(raw["class"])
-      value = ROAD_SIGNS.get(raw["class"]) if speed is None else speed  # what the memory confirms of it
-      self.raw_class, self.raw_speed, self.raw_confidence = raw["class"], speed or 0.0, float(raw["confidence"])
+      unit = sign_unit(self.country)
+      physical = sign_mps(speed, unit) if speed is not None else None
+      value = ROAD_SIGNS.get(raw["class"]) if speed is None else physical
+      self.raw_class, self.raw_confidence = raw["class"], float(raw["confidence"])
+      self.raw_value, self.raw_unit, self.raw_country = speed or 0.0, unit, self.country or ""
+      self.raw_speed = (speed or 0.0) if unit == "km/h" else physical * 3.6 if physical is not None else 0.0
       self.raw_taken = self._taken is not None and self._taken == value
     return limit
 
@@ -713,6 +769,9 @@ class SpeedLimitMemory:
     message.rawSignSpeed = self.raw_speed
     message.rawSignConfidence = self.raw_confidence
     message.rawSignTaken = self.raw_taken
+    message.rawSignValue = self.raw_value
+    message.rawSignUnit = self.raw_unit
+    message.rawSignCountry = self.raw_country
 
   def _update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...], road_type: str | None,
               v_ego: float | None) -> float:
@@ -786,6 +845,9 @@ class SpeedLimitMemory:
       self._merge_since = None
       return self.speed_limit
 
+    if self.country is None:
+      return self.speed_limit
+
     if road_type in CARRIAGEWAYS and not road_signs and self._number_at > -math.inf and \
         self._road_type_since - self._number_at >= CARRIAGEWAY_LAG and now - self._road_type_since >= ROAD_TYPE_SECONDS:
       self.road = road_type
@@ -801,8 +863,8 @@ class SpeedLimitMemory:
       self._set(self._general(road_type), "road", "road_type")
       return self.speed_limit
     if road_type == "zone30" and self.source == "sign" and not self._ramp_limit and \
-        self.speed_limit == self._general("town") and now - max(self._road_type_since, self._sign_at) >= ROAD_TYPE_SECONDS:
-      self._set(ZONE_LIMIT, "road", "zone30")
+        not self._explicit_number and self.speed_limit == self._general("town") and now - max(self._road_type_since, self._sign_at) >= ROAD_TYPE_SECONDS:
+      self._set(self._general("zone30"), "road", "zone30")
       return self.speed_limit
 
     if self._ramp_limit:

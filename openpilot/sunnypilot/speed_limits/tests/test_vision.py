@@ -132,27 +132,27 @@ def test_read_signs():
 
 
 def test_memory_confirms_and_holds():
-  memory = vision.SpeedLimitMemory()
-  assert memory.update(0.0, [60]) == 0  # one frame is not enough
-  assert memory.update(0.2, [60]) == 60 and memory.sign_read
-  assert memory.update(0.4, []) == 60 and not memory.sign_read  # held without a sign
-  assert memory.update(10.0, [80]) == 60
-  assert memory.update(12.0, [80]) == 60  # too far apart
-  assert memory.update(12.4, [80]) == 80
-  assert memory.update(15.0, [50, 50]) == 80  # a value counts once a frame
-  assert memory.update(20.0, [0]) == 80
-  assert memory.update(20.2, [0]) == 0  # the end of the limit clears it
+  memory = vision.SpeedLimitMemory("CH")
+  assert memory.update(0.0, [60]) == pytest.approx(0 / 3.6)  # one frame is not enough
+  assert memory.update(0.2, [60]) == pytest.approx(60 / 3.6) and memory.sign_read
+  assert memory.update(0.4, []) == pytest.approx(60 / 3.6) and not memory.sign_read  # held without a sign
+  assert memory.update(10.0, [80]) == pytest.approx(60 / 3.6)
+  assert memory.update(12.0, [80]) == pytest.approx(60 / 3.6)  # too far apart
+  assert memory.update(12.4, [80]) == pytest.approx(80 / 3.6)
+  assert memory.update(15.0, [50, 50]) == pytest.approx(80 / 3.6)  # a value counts once a frame
+  assert memory.update(20.0, [0]) == pytest.approx(80 / 3.6)
+  assert memory.update(20.2, [0]) == pytest.approx(0 / 3.6)  # the end of the limit clears it
 
 
 def test_memory_two_signs_at_once():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   memory.update(0.0, [80, 60])
-  assert memory.update(0.2, [80, 60]) == 60  # a tie: the lower
+  assert memory.update(0.2, [80, 60]) == pytest.approx(60 / 3.6)  # a tie: the lower
   memory.update(5.0, [100, 120])
   memory.update(5.2, [120])
-  assert memory.update(5.4, [100, 120]) == 120  # the one seen most
+  assert memory.update(5.4, [100, 120]) == pytest.approx(120 / 3.6)  # the one seen most
   memory.update(9.0, [0, 60])
-  assert memory.update(9.2, [0, 60]) == 60  # the end of a limit beside roadworks: not the general limit
+  assert memory.update(9.2, [0, 60]) == pytest.approx(60 / 3.6)  # the end of a limit beside roadworks: not the general limit
 
 
 def confirm(memory, at, readings=(), signs=(), **context):
@@ -161,214 +161,214 @@ def confirm(memory, at, readings=(), signs=(), **context):
 
 
 def test_memory_road_signs_set_the_general_limit():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, signs=["other_sign:town_entry"]) == 50
-  assert confirm(memory, 5.0, [30]) == 30
-  assert confirm(memory, 9.0, [0]) == 50  # the end of the 30 in a town: the town's 50
-  assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == 80
-  assert confirm(memory, 30.0, signs=["other_sign:give_way"]) == 80  # not a sign of the road's kind
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, signs=["other_sign:town_entry"]) == pytest.approx(50 / 3.6)
+  assert confirm(memory, 5.0, [30]) == pytest.approx(30 / 3.6)
+  assert confirm(memory, 9.0, [0]) == pytest.approx(50 / 3.6)  # the end of the 30 in a town: the town's 50
+  assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == pytest.approx(80 / 3.6)
+  assert confirm(memory, 30.0, signs=["other_sign:give_way"]) == pytest.approx(80 / 3.6)  # not a sign of the road's kind
   assert not memory.sign_read
-  assert confirm(memory, 40.0, signs=["other_sign:town_exit"]) == 80 and memory.sign_read  # the same limit read again
+  assert confirm(memory, 40.0, signs=["other_sign:town_exit"]) == pytest.approx(80 / 3.6) and memory.sign_read  # the same limit read again
   assert vision.SpeedLimitMemory("IT").update(0.0, [], ["other_sign:motorway_start"]) == 0
-  assert confirm(vision.SpeedLimitMemory("IT"), 0.0, signs=["other_sign:motorway_start"]) == 130
+  assert confirm(vision.SpeedLimitMemory("IT"), 0.0, signs=["other_sign:motorway_start"]) == pytest.approx(130 / 3.6)
 
 
 def test_memory_a_green_board_is_only_the_road_type_input():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, signs=["other_sign:town_exit"]) == 80
-  assert memory.update(10.0, [], ["other_sign:motorway_direction"]) == 80
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, signs=["other_sign:town_exit"]) == pytest.approx(80 / 3.6)
+  assert memory.update(10.0, [], ["other_sign:motorway_direction"]) == pytest.approx(80 / 3.6)
   assert memory.board_age(10.0) == float("inf")  # seen once: not confirmed
-  assert confirm(memory, 20.0, signs=["other_sign:motorway_direction"], road_type="ramp") == 80  # no 120 on the ramp
+  assert confirm(memory, 20.0, signs=["other_sign:motorway_direction"], road_type="ramp") == pytest.approx(80 / 3.6)  # no 120 on the ramp
   assert abs(memory.board_age(25.0) - 4.8) < 1e-9 and memory.road_sign_age(25.0) == float("inf")
   assert memory.road == "rural" and not memory.sign_read and memory.limit_reason == "road_sign"
   # With a number in the same frames, the number is the limit, and the board still counts.
-  assert confirm(memory, 30.0, [60], signs=["other_sign:motorway_direction"]) == 60 and memory.sign_read
+  assert confirm(memory, 30.0, [60], signs=["other_sign:motorway_direction"]) == pytest.approx(60 / 3.6) and memory.sign_read
   assert memory.board_age(30.2) == 0.0
 
 
 def test_memory_ramp_limit_ends_by_the_road_type_network():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"], road_type="motorway") == 120
-  assert confirm(memory, 10.0, [60], road_type="motorway") == 60  # the ramp's 60, by the sign, whatever the network
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"], road_type="motorway") == pytest.approx(120 / 3.6)
+  assert confirm(memory, 10.0, [60], road_type="motorway") == pytest.approx(60 / 3.6)  # the ramp's 60, by the sign, whatever the network
   for t in range(12, 20):
-    assert memory.update(float(t), [], road_type="ramp") == 60  # still on the ramp
+    assert memory.update(float(t), [], road_type="ramp") == pytest.approx(60 / 3.6)  # still on the ramp
   for t in range(20, 27):
-    assert memory.update(float(t), [], road_type="motorway") == 60  # on the carriageway, not long enough
-  assert memory.update(27.0, [], road_type="town") == 60  # a doubt starts the count again
+    assert memory.update(float(t), [], road_type="motorway") == pytest.approx(60 / 3.6)  # on the carriageway, not long enough
+  assert memory.update(27.0, [], road_type="town") == pytest.approx(60 / 3.6)  # a doubt starts the count again
   for t in range(28, 36):
     memory.update(float(t), [], road_type="motorway")
-  assert memory.update(36.0, [], road_type="motorway") == 120
+  assert memory.update(36.0, [], road_type="motorway") == pytest.approx(120 / 3.6)
   assert memory.road == "motorway"
 
 
 def test_memory_ramp_limit_far_from_the_sign_by_the_network():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 100.0, [60], road_type="ramp") == 60  # far from the sign, the network says ramp
+  assert confirm(memory, 100.0, [60], road_type="ramp") == pytest.approx(60 / 3.6)  # far from the sign, the network says ramp
   for t in range(102, 110):
     memory.update(float(t), [], road_type="expressway")
-  assert memory.update(110.0, [], road_type="expressway") == 100
+  assert memory.update(110.0, [], road_type="expressway") == pytest.approx(100 / 3.6)
 
 
 def test_memory_ramp_limit_ends_at_the_acceleration_lane():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:expressway_start"])
-  assert confirm(memory, 10.0, [60], road_type="ramp") == 60
+  assert confirm(memory, 10.0, [60], road_type="ramp") == pytest.approx(60 / 3.6)
   for t in range(11, 20):
-    assert memory.update(float(t), [], road_type="ramp") == 60
+    assert memory.update(float(t), [], road_type="ramp") == pytest.approx(60 / 3.6)
   # The expressway's 100 from the start of the acceleration lane, not 8 s into the carriageway.
-  assert memory.update(20.0, [], road_type="merge") == 100 and memory.road == "expressway" and memory.source == "sign"
+  assert memory.update(20.0, [], road_type="merge") == pytest.approx(100 / 3.6) and memory.road == "expressway" and memory.source == "sign"
   for t in range(21, 40):
-    assert memory.update(float(t), [], road_type="rural") == 100  # held as a sign's: the network's doubts change nothing
+    assert memory.update(float(t), [], road_type="rural") == pytest.approx(100 / 3.6)  # held as a sign's: the network's doubts change nothing
 
 
 def test_memory_acceleration_lane_of_an_unknown_carriageway_waits_for_it():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [60], road_type="ramp") == 60  # no motorway or expressway sign seen
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [60], road_type="ramp") == pytest.approx(60 / 3.6)  # no motorway or expressway sign seen
   for t in range(2, 8):
-    assert memory.update(float(t), [], road_type="merge") == 60  # which carriageway: not known yet
+    assert memory.update(float(t), [], road_type="merge") == pytest.approx(60 / 3.6)  # which carriageway: not known yet
   # The lane counts towards MERGE_SECONDS: the carriageway named 8 s after the lane started.
-  assert memory.update(8.0, [], road_type="motorway") == 60
-  assert memory.update(10.0, [], road_type="motorway") == 120 and memory.road == "motorway"
+  assert memory.update(8.0, [], road_type="motorway") == pytest.approx(60 / 3.6)
+  assert memory.update(10.0, [], road_type="motorway") == pytest.approx(120 / 3.6) and memory.road == "motorway"
 
 
 def test_memory_acceleration_lane_far_from_the_sign_is_not_known():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 100.0, [60], road_type="ramp") == 60  # another ramp, long after the motorway's sign
-  assert memory.update(105.0, [], road_type="merge") == 60
-  assert memory.update(113.0, [], road_type="expressway") == 100
+  assert confirm(memory, 100.0, [60], road_type="ramp") == pytest.approx(60 / 3.6)  # another ramp, long after the motorway's sign
+  assert memory.update(105.0, [], road_type="merge") == pytest.approx(60 / 3.6)
+  assert memory.update(113.0, [], road_type="expressway") == pytest.approx(100 / 3.6)
 
 
 def test_memory_acceleration_lane_without_a_ramp_limit_changes_nothing():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 300.0, [80], road_type="motorway") == 80  # roadworks long after the entry
+  assert confirm(memory, 300.0, [80], road_type="motorway") == pytest.approx(80 / 3.6)  # roadworks long after the entry
   for t in range(301, 320):
-    assert memory.update(float(t), [], road_type="merge") == 80  # another entry joins the motorway here
+    assert memory.update(float(t), [], road_type="merge") == pytest.approx(80 / 3.6)  # another entry joins the motorway here
 
 
 def test_memory_a_limit_read_on_the_acceleration_lane_is_the_carriageways():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 8.0, [60], road_type="ramp") == 60
-  assert memory.update(20.0, [], road_type="merge") == 120
-  assert confirm(memory, 25.0, [100], road_type="merge") == 100  # the motorway's own 100, beside the lane
+  assert confirm(memory, 8.0, [60], road_type="ramp") == pytest.approx(60 / 3.6)
+  assert memory.update(20.0, [], road_type="merge") == pytest.approx(120 / 3.6)
+  assert confirm(memory, 25.0, [100], road_type="merge") == pytest.approx(100 / 3.6)  # the motorway's own 100, beside the lane
   for t in range(26, 70):
-    assert memory.update(float(t), [], road_type="merge" if t < 30 else "motorway") == 100
+    assert memory.update(float(t), [], road_type="merge" if t < 30 else "motorway") == pytest.approx(100 / 3.6)
 
 
 
 def test_memory_a_limit_read_on_the_lane_without_a_ramps_number_is_the_carriageways():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
   for t in range(1, 20):
     memory.update(float(t), [], road_type="ramp")  # no number on the ramp
   memory.update(20.0, [], road_type="merge")
-  assert confirm(memory, 22.0, [100], road_type="merge") == 100
+  assert confirm(memory, 22.0, [100], road_type="merge") == pytest.approx(100 / 3.6)
   for t in range(23, 60):
-    assert memory.update(float(t), [], road_type="merge" if t < 30 else "motorway") == 100
+    assert memory.update(float(t), [], road_type="merge" if t < 30 else "motorway") == pytest.approx(100 / 3.6)
 
 
 def test_memory_an_expressways_link_to_the_motorway_ends_its_limit_on_the_lane():
-  memory = vision.SpeedLimitMemory()
-  for t in range(0, 10):
+  memory = vision.SpeedLimitMemory("CH")
+  for t in range(10):
     memory.update(float(t), [], road_type="expressway")
   confirm(memory, 10.0, signs=["other_sign:motorway_start"])
   for t in range(11, 13):
     memory.update(float(t), [], road_type="expressway")  # the debounce: still the road before the sign
-  assert confirm(memory, 14.0, [80], road_type="ramp") == 80
+  assert confirm(memory, 14.0, [80], road_type="ramp") == pytest.approx(80 / 3.6)
   for t in range(15, 30):
-    assert memory.update(float(t), [], road_type="ramp") == 80
-  assert memory.update(30.0, [], road_type="merge") == 120 and memory.road == "motorway"
+    assert memory.update(float(t), [], road_type="ramp") == pytest.approx(80 / 3.6)
+  assert memory.update(30.0, [], road_type="merge") == pytest.approx(120 / 3.6) and memory.road == "motorway"
 
 def test_memory_a_limit_read_past_a_ramps_limit_is_the_carriageways():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 8.0, [60], road_type="ramp") == 60
+  assert confirm(memory, 8.0, [60], road_type="ramp") == pytest.approx(60 / 3.6)
   for t in range(20, 28):
     memory.update(float(t), [], road_type="motorway")  # a network without the lane
-  assert memory.update(28.0, [], road_type="motorway") == 120
-  assert confirm(memory, 35.0, [100], road_type="motorway") == 100  # 35 s after the sign, but on the carriageway
+  assert memory.update(28.0, [], road_type="motorway") == pytest.approx(120 / 3.6)
+  assert confirm(memory, 35.0, [100], road_type="motorway") == pytest.approx(100 / 3.6)  # 35 s after the sign, but on the carriageway
   for t in range(36, 80):
-    assert memory.update(float(t), [], road_type="motorway") == 100
+    assert memory.update(float(t), [], road_type="motorway") == pytest.approx(100 / 3.6)
 
 
 def test_memory_a_ramp_off_the_motorway_does_not_take_its_limit_to_an_expressway():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
   for t in range(1, 20):
     memory.update(float(t), [], road_type="motorway")
-  assert confirm(memory, 20.0, [80], road_type="ramp") == 80  # a link to an expressway, 20 s after the sign
-  assert memory.update(30.0, [], road_type="merge") == 80  # which carriageway it joins: not known
+  assert confirm(memory, 20.0, [80], road_type="ramp") == pytest.approx(80 / 3.6)  # a link to an expressway, 20 s after the sign
+  assert memory.update(30.0, [], road_type="merge") == pytest.approx(80 / 3.6)  # which carriageway it joins: not known
   for t in range(31, 38):
-    assert memory.update(float(t), [], road_type="expressway") == 80
-  assert memory.update(38.0, [], road_type="expressway") == 100 and memory.road == "expressway"
+    assert memory.update(float(t), [], road_type="expressway") == pytest.approx(80 / 3.6)
+  assert memory.update(38.0, [], road_type="expressway") == pytest.approx(100 / 3.6) and memory.road == "expressway"
 
 
 def test_memory_the_acceleration_lane_counts_for_the_carriageways_scene_limit():
-  memory = vision.SpeedLimitMemory()
-  assert drive(memory, 0.0, 12.0, road_type="rural") == 80
+  memory = vision.SpeedLimitMemory("CH")
+  assert drive(memory, 0.0, 12.0, road_type="rural") == pytest.approx(80 / 3.6)
   drive(memory, 12.0, 20.0, road_type="ramp")
-  assert drive(memory, 20.0, 26.0, road_type="merge") == 80
-  assert drive(memory, 26.0, 29.0, road_type="motorway") == 80
-  assert drive(memory, 29.0, 30.4, road_type="motorway") == 120  # ROAD_TYPE_SECONDS from the lane's start
+  assert drive(memory, 20.0, 26.0, road_type="merge") == pytest.approx(80 / 3.6)
+  assert drive(memory, 26.0, 29.0, road_type="motorway") == pytest.approx(80 / 3.6)
+  assert drive(memory, 29.0, 30.4, road_type="motorway") == pytest.approx(120 / 3.6)  # ROAD_TYPE_SECONDS from the lane's start
 
 
 def test_memory_a_limit_read_off_the_carriageway_ends_on_it():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [60], road_type="rural") == 60  # before the entry; its end sign and the ramp missed
-  assert drive(memory, 1.0, 20.0, road_type="rural") == 60
-  assert drive(memory, 20.0, 29.8, road_type="motorway") == 60  # on the motorway, not long enough
-  assert drive(memory, 29.8, 31.0, road_type="motorway") == 120 and memory.road == "motorway"
-  assert confirm(memory, 40.0, [80], road_type="motorway") == 80  # roadworks on the motorway hold
-  assert drive(memory, 41.0, 100.0, road_type="motorway") == 80
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [60], road_type="rural") == pytest.approx(60 / 3.6)  # before the entry; its end sign and the ramp missed
+  assert drive(memory, 1.0, 20.0, road_type="rural") == pytest.approx(60 / 3.6)
+  assert drive(memory, 20.0, 29.8, road_type="motorway") == pytest.approx(60 / 3.6)  # on the motorway, not long enough
+  assert drive(memory, 29.8, 31.0, road_type="motorway") == pytest.approx(120 / 3.6) and memory.road == "motorway"
+  assert confirm(memory, 40.0, [80], road_type="motorway") == pytest.approx(80 / 3.6)  # roadworks on the motorway hold
+  assert drive(memory, 41.0, 100.0, road_type="motorway") == pytest.approx(80 / 3.6)
 
 
 def test_memory_a_limit_read_just_before_the_network_sees_the_carriageway_holds():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   drive(memory, 0.0, 17.0, road_type="rural")
-  assert confirm(memory, 17.0, [80], road_type="rural") == 80  # on the motorway already: the debounce lags
-  assert drive(memory, 18.0, 60.0, road_type="motorway") == 80
+  assert confirm(memory, 17.0, [80], road_type="rural") == pytest.approx(80 / 3.6)  # on the motorway already: the debounce lags
+  assert drive(memory, 18.0, 60.0, road_type="motorway") == pytest.approx(80 / 3.6)
 
 
 def test_memory_ramp_limit_holds_without_the_network():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 10.0, [60]) == 60
+  assert confirm(memory, 10.0, [60]) == pytest.approx(60 / 3.6)
   for t in range(12, 200):
-    assert memory.update(float(t), []) == 60  # nothing says the ramp is over: the 60 holds until a sign
+    assert memory.update(float(t), []) == pytest.approx(60 / 3.6)  # nothing says the ramp is over: the 60 holds until a sign
 
 
 def test_memory_motorway_limit_is_not_a_ramp_limit():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 300.0, [80], road_type="motorway") == 80  # roadworks long after the entry
+  assert confirm(memory, 300.0, [80], road_type="motorway") == pytest.approx(80 / 3.6)  # roadworks long after the entry
   for t in range(301, 320):
-    assert memory.update(float(t), [], road_type="motorway") == 80  # the motorway does not end it
+    assert memory.update(float(t), [], road_type="motorway") == pytest.approx(80 / 3.6)  # the motorway does not end it
 
 
 def test_memory_germany_has_no_general_motorway_limit():
   memory = vision.SpeedLimitMemory("DE")
   confirm(memory, 0.0, signs=["other_sign:motorway_start"])
-  assert confirm(memory, 5.0, [80]) == 80
+  assert confirm(memory, 5.0, [80]) == pytest.approx(80 / 3.6)
   for t in range(7, 16):
     memory.update(float(t), [], road_type="motorway")
-  assert memory.speed_limit == 0  # no limit
+  assert memory.speed_limit == pytest.approx(0 / 3.6)  # no limit
 
 
 def test_memory_general_limits_by_country():
-  assert confirm(vision.SpeedLimitMemory("LI"), 0.0, signs=["other_sign:motorway_start"]) == 80
-  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, signs=["other_sign:expressway_start"]) == 100
-  assert confirm(vision.SpeedLimitMemory("PL"), 0.0, signs=["other_sign:motorway_start"]) == 140
-  assert vision.SpeedLimitMemory("GB").country == vision.DEFAULT_COUNTRY  # mph: not handled
+  assert confirm(vision.SpeedLimitMemory("LI"), 0.0, signs=["other_sign:motorway_start"]) == pytest.approx(80 / 3.6)
+  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, signs=["other_sign:expressway_start"]) == pytest.approx(100 / 3.6)
+  assert confirm(vision.SpeedLimitMemory("PL"), 0.0, signs=["other_sign:motorway_start"]) == pytest.approx(140 / 3.6)
+  assert vision.SpeedLimitMemory("GB").country == "GB"  # unit support is independent of implicit rules
 
 
 def test_memory_a_road_sign_keeps_the_limit_in_sweden():
   memory = vision.SpeedLimitMemory("SE")
-  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == 110  # nothing held: the motorway's limit
-  assert confirm(memory, 5.0, [90]) == 90
-  assert confirm(memory, 10.0, signs=["other_sign:motorway_end"]) == 90  # the 90 holds until its end sign
+  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == pytest.approx(110 / 3.6)  # nothing held: the motorway's limit
+  assert confirm(memory, 5.0, [90]) == pytest.approx(90 / 3.6)
+  assert confirm(memory, 10.0, signs=["other_sign:motorway_end"]) == pytest.approx(90 / 3.6)  # the 90 holds until its end sign
   assert memory.road == "rural"
 
 
@@ -380,64 +380,64 @@ def drive(memory, start, end, readings=(), signs=(), **context):
 
 
 def test_memory_out_of_a_car_park_into_a_town():
-  memory = vision.SpeedLimitMemory()
-  assert drive(memory, 0.0, 4.0, road_type="parking", v_ego=2.0) == 0  # not long enough yet
-  assert drive(memory, 4.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT and memory.source == "parking"
-  assert drive(memory, 6.0, 9.0, road_type="ramp", v_ego=4.0) == vision.GARAGE_LIMIT  # not a road with a limit
-  assert drive(memory, 9.0, 12.0, road_type="town", v_ego=6.0) == vision.GARAGE_LIMIT  # not long enough yet
-  assert drive(memory, 12.0, 20.0, road_type="town", v_ego=6.0) == 50 and memory.source == "road"  # the street
-  assert confirm(memory, 25.0, [30], road_type="town") == 30 and memory.source == "sign"
-  assert drive(memory, 26.0, 45.0, road_type="rural", v_ego=15.0) == 30  # a sign holds whatever the scene
+  memory = vision.SpeedLimitMemory("CH")
+  assert drive(memory, 0.0, 4.0, road_type="parking", v_ego=2.0) == pytest.approx(0 / 3.6)  # not long enough yet
+  assert drive(memory, 4.0, 6.0, road_type="parking", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6) and memory.source == "parking"
+  assert drive(memory, 6.0, 9.0, road_type="ramp", v_ego=4.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)  # not a road with a limit
+  assert drive(memory, 9.0, 12.0, road_type="town", v_ego=6.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)  # not long enough yet
+  assert drive(memory, 12.0, 20.0, road_type="town", v_ego=6.0) == pytest.approx(50 / 3.6) and memory.source == "road"  # the street
+  assert confirm(memory, 25.0, [30], road_type="town") == pytest.approx(30 / 3.6) and memory.source == "sign"
+  assert drive(memory, 26.0, 45.0, road_type="rural", v_ego=15.0) == pytest.approx(30 / 3.6)  # a sign holds whatever the scene
 
 
 def test_memory_a_moment_of_a_street_inside_a_car_park_keeps_it():
-  memory = vision.SpeedLimitMemory()
-  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT
-  assert drive(memory, 6.0, 8.8, road_type="town", v_ego=5.0) == vision.GARAGE_LIMIT  # the network unsure: 2.8 s
-  assert drive(memory, 8.8, 20.0, road_type="parking", v_ego=0.0) == vision.GARAGE_LIMIT
+  memory = vision.SpeedLimitMemory("CH")
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
+  assert drive(memory, 6.0, 8.8, road_type="town", v_ego=5.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)  # the network unsure: 2.8 s
+  assert drive(memory, 8.8, 20.0, road_type="parking", v_ego=0.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
 
 
 def test_memory_the_scene_gives_the_limit_only_without_a_sign():
-  memory = vision.SpeedLimitMemory()
-  assert memory.update(0.0, [], road_type="town") == 50  # the start of a drive in a town
-  assert drive(memory, 0.2, 9.0, road_type="rural") == 50  # another road type: not long enough
-  assert drive(memory, 9.0, 11.0, road_type="rural") == 80
-  assert drive(memory, 11.0, 15.0, road_type=None) == 80  # no answer: it holds
-  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, road_type="motorway") == 0  # no general limit there
-  assert vision.SpeedLimitMemory().update(0.0, [], road_type="ramp") == 0
+  memory = vision.SpeedLimitMemory("CH")
+  assert memory.update(0.0, [], road_type="town") == pytest.approx(50 / 3.6)  # the start of a drive in a town
+  assert drive(memory, 0.2, 9.0, road_type="rural") == pytest.approx(50 / 3.6)  # another road type: not long enough
+  assert drive(memory, 9.0, 11.0, road_type="rural") == pytest.approx(80 / 3.6)
+  assert drive(memory, 11.0, 15.0, road_type=None) == pytest.approx(80 / 3.6)  # no answer: it holds
+  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, road_type="motorway") == pytest.approx(0 / 3.6)  # no general limit there
+  assert vision.SpeedLimitMemory("CH").update(0.0, [], road_type="ramp") == 0
 
 
 def test_memory_a_car_park_needs_a_slow_car_and_drops_the_road_before():
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [80]) == 80
-  assert drive(memory, 1.0, 20.0, road_type="parking", v_ego=20.0) == 80  # too fast for a car park
-  assert drive(memory, 20.0, 24.0, road_type="parking") == 80  # the speed unknown
-  assert drive(memory, 24.0, 30.0, road_type="parking", v_ego=3.0) == vision.GARAGE_LIMIT
-  assert confirm(memory, 40.0, [30], road_type="parking", v_ego=3.0) == vision.GARAGE_LIMIT  # higher: not taken
-  assert confirm(memory, 45.0, [5], road_type="parking", v_ego=3.0) == 5  # lower: taken
-  assert drive(memory, 50.0, 53.0, road_type="rural", v_ego=8.0) == 5  # still the car park
-  assert drive(memory, 53.0, 54.0, road_type="rural", v_ego=8.0) == 80
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [80]) == pytest.approx(80 / 3.6)
+  assert drive(memory, 1.0, 20.0, road_type="parking", v_ego=20.0) == pytest.approx(80 / 3.6)  # too fast for a car park
+  assert drive(memory, 20.0, 24.0, road_type="parking") == pytest.approx(80 / 3.6)  # the speed unknown
+  assert drive(memory, 24.0, 30.0, road_type="parking", v_ego=3.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
+  assert confirm(memory, 40.0, [30], road_type="parking", v_ego=3.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)  # higher: not taken
+  assert confirm(memory, 45.0, [5], road_type="parking", v_ego=3.0) == pytest.approx(5 / 3.6)  # lower: taken
+  assert drive(memory, 50.0, 53.0, road_type="rural", v_ego=8.0) == pytest.approx(5 / 3.6)  # still the car park
+  assert drive(memory, 53.0, 54.0, road_type="rural", v_ego=8.0) == pytest.approx(80 / 3.6)
 
 
 def test_memory_a_garage_and_a_car_park_in_the_open():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   memory.garage_known = True
-  assert confirm(memory, 0.0, [50], road_type="town") == 50
-  assert drive(memory, 1.0, 7.0, road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT == 20
-  assert drive(memory, 7.0, 11.0, road_type="garage", v_ego=3.0) == vision.PARKING_LIMIT  # not long enough yet
-  assert drive(memory, 11.0, 13.0, road_type="garage", v_ego=2.0) == vision.GARAGE_LIMIT == 10  # down the ramp
-  assert confirm(memory, 20.0, [5], road_type="garage", v_ego=2.0) == 5  # lower: taken
-  assert drive(memory, 21.0, 26.0, road_type="garage", v_ego=2.0) == 5  # the same garage: the sign holds
-  assert drive(memory, 26.0, 32.0, road_type="parking", v_ego=3.0) == vision.PARKING_LIMIT  # out in the open
-  assert drive(memory, 32.0, 43.0, road_type="town", v_ego=8.0) == 50 and memory.source == "road"
+  assert confirm(memory, 0.0, [50], road_type="town") == pytest.approx(50 / 3.6)
+  assert drive(memory, 1.0, 7.0, road_type="parking", v_ego=3.0) == pytest.approx(vision.PARKING_LIMIT / 3.6) and vision.PARKING_LIMIT == 20
+  assert drive(memory, 7.0, 11.0, road_type="garage", v_ego=3.0) == pytest.approx(vision.PARKING_LIMIT / 3.6)  # not long enough yet
+  assert drive(memory, 11.0, 13.0, road_type="garage", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6) and vision.GARAGE_LIMIT == 10  # down the ramp
+  assert confirm(memory, 20.0, [5], road_type="garage", v_ego=2.0) == pytest.approx(5 / 3.6)  # lower: taken
+  assert drive(memory, 21.0, 26.0, road_type="garage", v_ego=2.0) == pytest.approx(5 / 3.6)  # the same garage: the sign holds
+  assert drive(memory, 26.0, 32.0, road_type="parking", v_ego=3.0) == pytest.approx(vision.PARKING_LIMIT / 3.6)  # out in the open
+  assert drive(memory, 32.0, 43.0, road_type="town", v_ego=8.0) == pytest.approx(50 / 3.6) and memory.source == "road"
 
 
 def test_memory_a_network_without_garage_keeps_a_car_park_at_the_garage_limit():
-  memory = vision.SpeedLimitMemory()
-  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
+  memory = vision.SpeedLimitMemory("CH")
   memory.garage_known = True
-  assert drive(memory, 0.0, 6.0, road_type="garage", v_ego=2.0) == vision.GARAGE_LIMIT
+  assert drive(memory, 0.0, 6.0, road_type="garage", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
 
 
 def test_car_motion_features():
@@ -526,23 +526,23 @@ def test_road_type_input_is_the_resized_frame():
 
 
 def test_memory_a_30_zone_seen_keeps_the_car_at_30():
-  memory = vision.SpeedLimitMemory()
-  assert memory.update(0.0, [], road_type="zone30") == 30  # the start of a drive inside a zone
-  assert drive(memory, 0.2, 9.0, road_type="town") == 30  # out of it: not long enough yet
-  assert drive(memory, 9.0, 11.0, road_type="town") == 50
-  # A 50 read on the main street, the gate of the zone missed: once the zone is seen long enough, 30.
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [50], road_type="town") == 50 and memory.source == "sign"
-  assert drive(memory, 1.0, 10.0, road_type="zone30") == 50
-  assert drive(memory, 10.0, 12.0, road_type="zone30") == 30 and memory.source == "road"
+  memory = vision.SpeedLimitMemory("CH")
+  assert memory.update(0.0, [], road_type="zone30") == pytest.approx(30 / 3.6)  # the start of a drive inside a zone
+  assert drive(memory, 0.2, 9.0, road_type="town") == pytest.approx(30 / 3.6)  # out of it: not long enough yet
+  assert drive(memory, 9.0, 11.0, road_type="town") == pytest.approx(50 / 3.6)
+  # An explicit 50 is a signed number, even when it equals the town default: the scene cannot replace it.
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [50], road_type="town") == pytest.approx(50 / 3.6) and memory.source == "sign"
+  assert drive(memory, 1.0, 10.0, road_type="zone30") == pytest.approx(50 / 3.6)
+  assert drive(memory, 10.0, 12.0, road_type="zone30") == pytest.approx(50 / 3.6) and memory.source == "sign"
   # Its end sign: the town again, though the network still sees the zone for a moment.
-  assert confirm(memory, 20.0, [0], road_type="zone30") == 50
-  assert drive(memory, 21.0, 26.0, road_type="zone30") == 50
-  assert drive(memory, 26.0, 40.0, road_type="town") == 50
+  assert confirm(memory, 20.0, [0], road_type="zone30") == pytest.approx(50 / 3.6)
+  assert drive(memory, 21.0, 26.0, road_type="zone30") == pytest.approx(50 / 3.6)
+  assert drive(memory, 26.0, 40.0, road_type="town") == pytest.approx(50 / 3.6)
   # A higher number holds: the network may be wrong about the zone.
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [60], road_type="town") == 60
-  assert drive(memory, 1.0, 30.0, road_type="zone30") == 60
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [60], road_type="town") == pytest.approx(60 / 3.6)
+  assert drive(memory, 1.0, 30.0, road_type="zone30") == pytest.approx(60 / 3.6)
 
 
 class FakeZoneRoadType(FakeRoadType):
@@ -581,82 +581,82 @@ def test_apply_settings_takes_only_known_numbers_in_bounds(monkeypatch):
 def test_a_limit_read_off_the_carriageway_follows_its_setting(monkeypatch):
   monkeypatch.setattr(vision, "CARRIAGEWAY_LAG", vision.CARRIAGEWAY_LAG)
   assert vision.apply_settings({"carriageway_lag": 0.0}) == {"carriageway_lag": 0.0}
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   drive(memory, 0.0, 17.0, road_type="rural")
-  assert confirm(memory, 17.0, [80], road_type="rural") == 80
-  assert drive(memory, 18.0, 30.0, road_type="motorway") == 120  # no lag: read before the motorway, it ends
+  assert confirm(memory, 17.0, [80], road_type="rural") == pytest.approx(80 / 3.6)
+  assert drive(memory, 18.0, 30.0, road_type="motorway") == pytest.approx(120 / 3.6)  # no lag: read before the motorway, it ends
 
 
 def test_the_exit_of_a_car_park_follows_its_setting(monkeypatch):
   monkeypatch.setattr(vision, "PARKING_EXIT_SECONDS", vision.PARKING_EXIT_SECONDS)
   assert vision.apply_settings({"parking_exit_seconds": 8.0}) == {"parking_exit_seconds": 8.0}
-  memory = vision.SpeedLimitMemory()
-  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT
-  assert drive(memory, 6.0, 14.0, road_type="town", v_ego=6.0) == vision.GARAGE_LIMIT
-  assert drive(memory, 14.0, 15.0, road_type="town", v_ego=6.0) == 50
+  memory = vision.SpeedLimitMemory("CH")
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
+  assert drive(memory, 6.0, 14.0, road_type="town", v_ego=6.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
+  assert drive(memory, 14.0, 15.0, road_type="town", v_ego=6.0) == pytest.approx(50 / 3.6)
 
 
 def test_settings_change_the_memory(monkeypatch):
   monkeypatch.setattr(vision, "CONFIRM_FRAMES", 2)
   vision.apply_settings({"confirm_frames": 1})
-  memory = vision.SpeedLimitMemory()
-  assert memory.update(0.0, [80]) == 80
+  memory = vision.SpeedLimitMemory("CH")
+  assert memory.update(0.0, [80]) == pytest.approx(80 / 3.6)
 
 
 def test_memory_says_which_rule_set_the_limit():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   assert (memory.limit_reason, memory.limit_state) == ("", "unknown")
-  assert memory.update(0.0, [], road_type="town") == 50 and (memory.limit_reason, memory.limit_state) == ("road_type", "limit")
-  assert confirm(memory, 5.0, [30], road_type="town") == 30 and memory.limit_reason == "sign"
-  assert confirm(memory, 9.0, [0], road_type="town") == 50 and memory.limit_reason == "end_sign"
-  assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == 80 and memory.limit_reason == "road_sign"
-  assert drive(memory, 21.0, 300.0) == 80 and memory.limit_reason == "road_sign"  # no timeout: it holds
-  assert confirm(memory, 300.0, [80]) == 80 and memory.limit_reason == "sign"  # the same limit, from a sign now
+  assert memory.update(0.0, [], road_type="town") == pytest.approx(50 / 3.6) and (memory.limit_reason, memory.limit_state) == ("road_type", "limit")
+  assert confirm(memory, 5.0, [30], road_type="town") == pytest.approx(30 / 3.6) and memory.limit_reason == "sign"
+  assert confirm(memory, 9.0, [0], road_type="town") == pytest.approx(50 / 3.6) and memory.limit_reason == "end_sign"
+  assert confirm(memory, 20.0, signs=["other_sign:town_exit"]) == pytest.approx(80 / 3.6) and memory.limit_reason == "road_sign"
+  assert drive(memory, 21.0, 300.0) == pytest.approx(80 / 3.6) and memory.limit_reason == "road_sign"  # no timeout: it holds
+  assert confirm(memory, 300.0, [80]) == pytest.approx(80 / 3.6) and memory.limit_reason == "sign"  # the same limit, from a sign now
 
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, signs=["other_sign:expressway_start"])
-  assert confirm(memory, 10.0, [60], road_type="ramp") == 60 and memory.limit_reason == "sign"
-  assert memory.update(20.0, [], road_type="merge") == 100 and memory.limit_reason == "ramp_end"
+  assert confirm(memory, 10.0, [60], road_type="ramp") == pytest.approx(60 / 3.6) and memory.limit_reason == "sign"
+  assert memory.update(20.0, [], road_type="merge") == pytest.approx(100 / 3.6) and memory.limit_reason == "ramp_end"
 
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   confirm(memory, 0.0, [60], road_type="rural")
   drive(memory, 1.0, 20.0, road_type="rural")
-  assert drive(memory, 20.0, 31.0, road_type="motorway") == 120 and memory.limit_reason == "carriageway"
+  assert drive(memory, 20.0, 31.0, road_type="motorway") == pytest.approx(120 / 3.6) and memory.limit_reason == "carriageway"
 
-  memory = vision.SpeedLimitMemory()
-  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == vision.GARAGE_LIMIT and memory.limit_reason == "car_park"
-  assert confirm(memory, 10.0, [5], road_type="parking", v_ego=2.0) == 5 and memory.limit_reason == "sign"
-  assert drive(memory, 12.0, 20.0, road_type="town", v_ego=6.0) == 50 and memory.limit_reason == "road_type"
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [vision.GARAGE_LIMIT], road_type="town") == vision.GARAGE_LIMIT
+  memory = vision.SpeedLimitMemory("CH")
+  assert drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6) and memory.limit_reason == "car_park"
+  assert confirm(memory, 10.0, [5], road_type="parking", v_ego=2.0) == pytest.approx(5 / 3.6) and memory.limit_reason == "sign"
+  assert drive(memory, 12.0, 20.0, road_type="town", v_ego=6.0) == pytest.approx(50 / 3.6) and memory.limit_reason == "road_type"
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [vision.GARAGE_LIMIT], road_type="town") == pytest.approx(vision.GARAGE_LIMIT / 3.6)
   # The same limit from a car park: its rule now.
-  assert drive(memory, 1.0, 8.0, road_type="garage", v_ego=2.0) == vision.GARAGE_LIMIT and memory.source == "parking"
+  assert drive(memory, 1.0, 8.0, road_type="garage", v_ego=2.0) == pytest.approx(vision.GARAGE_LIMIT / 3.6) and memory.source == "parking"
   assert memory.limit_reason == "car_park"
 
-  memory = vision.SpeedLimitMemory()
-  confirm(memory, 0.0, [50], road_type="town")
-  assert drive(memory, 1.0, 12.0, road_type="zone30") == 30 and memory.limit_reason == "zone30"
-  assert drive(memory, 12.0, 30.0, road_type="zone30") == 30 and memory.limit_reason == "zone30"  # the scene holds it
+  memory = vision.SpeedLimitMemory("CH")
+  confirm(memory, 0.0, signs=["other_sign:town_entry"], road_type="town")
+  assert drive(memory, 1.0, 12.0, road_type="zone30") == pytest.approx(30 / 3.6) and memory.limit_reason == "zone30"
+  assert drive(memory, 12.0, 30.0, road_type="zone30") == pytest.approx(30 / 3.6) and memory.limit_reason == "zone30"  # the scene holds it
 
 
 def test_memory_tells_no_limit_from_an_unknown_one():
   memory = vision.SpeedLimitMemory("DE")
-  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == 0
+  assert confirm(memory, 0.0, signs=["other_sign:motorway_start"]) == pytest.approx(0 / 3.6)
   assert (memory.limit_reason, memory.limit_state) == ("road_sign", "none")  # the motorway in Germany: no limit
-  assert confirm(memory, 5.0, [120]) == 120 and memory.limit_state == "limit"
-  assert confirm(memory, 10.0, [0]) == 0 and (memory.limit_reason, memory.limit_state) == ("end_sign", "none")
-  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, road_type="motorway") == 0
-  memory = vision.SpeedLimitMemory()
-  assert confirm(memory, 0.0, [80]) == 80
+  assert confirm(memory, 5.0, [120]) == pytest.approx(120 / 3.6) and memory.limit_state == "limit"
+  assert confirm(memory, 10.0, [0]) == pytest.approx(0 / 3.6) and (memory.limit_reason, memory.limit_state) == ("end_sign", "none")
+  assert confirm(vision.SpeedLimitMemory("DE"), 0.0, road_type="motorway") == pytest.approx(0 / 3.6)
+  memory = vision.SpeedLimitMemory("CH")
+  assert confirm(memory, 0.0, [80]) == pytest.approx(80 / 3.6)
   # The end of a limit on a road of unknown kind: its general limit is not known.
-  assert confirm(memory, 5.0, [0]) == 0 and (memory.limit_reason, memory.limit_state) == ("end_sign", "unknown")
-  assert drive(memory, 6.0, 10.0, road_type="ramp") == 0 and memory.limit_state == "unknown"
+  assert confirm(memory, 5.0, [0]) == pytest.approx(0 / 3.6) and (memory.limit_reason, memory.limit_state) == ("end_sign", "unknown")
+  assert drive(memory, 6.0, 10.0, road_type="ramp") == pytest.approx(0 / 3.6) and memory.limit_state == "unknown"
   memory = vision.SpeedLimitMemory("DE")
   confirm(memory, 0.0, [60], road_type="ramp")
-  assert confirm(memory, 5.0, [0], road_type="ramp") == 0
+  assert confirm(memory, 5.0, [0], road_type="ramp") == pytest.approx(0 / 3.6)
   assert (memory.limit_reason, memory.limit_state) == ("end_sign", "unknown")
   # Then the road type says the road has none: its rule, not the end sign's.
-  assert drive(memory, 6.0, 8.0, road_type="motorway") == 0
+  assert drive(memory, 6.0, 8.0, road_type="motorway") == pytest.approx(0 / 3.6)
   assert (memory.limit_reason, memory.limit_state) == ("road_type", "none")
 
 
@@ -673,7 +673,7 @@ def test_memory_reason_and_state_on_a_drive():
                     road_type=context.get("road_type"), v_ego=context.get("v_ego"))
       assert memory.limit_reason in vision.LIMIT_REASONS and memory.limit_state in vision.LIMIT_STATES
       assert (memory.limit_state == "limit") == (memory.speed_limit > 0)
-  assert (memory.speed_limit, memory.limit_state) == (0, "none")
+  assert (memory.speed_limit, memory.limit_state) == (pytest.approx(0 / 3.6), "none")
 
 
 def reading(name, confidence):
@@ -696,45 +696,45 @@ def raw(memory):
 
 
 def test_memory_keeps_the_last_raw_reading_and_whether_it_took_it():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   assert raw(memory) == ("", 0.0, 0.0, False)
   unsure = reading("maximum_speed:30", 0.6)  # under MIN_CONFIDENCE: not among the readings
-  assert memory.update(0.0, [], raw=unsure) == 0 and memory.update(0.2, [], raw=unsure) == 0
+  assert memory.update(0.0, [], raw=unsure) == pytest.approx(0 / 3.6) and memory.update(0.2, [], raw=unsure) == pytest.approx(0 / 3.6)
   assert raw(memory) == ("maximum_speed:30", 30.0, 0.6, False)
   # One frame is not enough: taken in the frame that confirms it, then kept until another reading.
-  assert memory.update(1.0, [80], raw=reading("maximum_speed:80", 0.9)) == 0
+  assert memory.update(1.0, [80], raw=reading("maximum_speed:80", 0.9)) == pytest.approx(0 / 3.6)
   assert raw(memory) == ("maximum_speed:80", 80.0, 0.9, False)
-  assert memory.update(1.2, [80], raw=reading("maximum_speed:80", 0.95)) == 80 and raw(memory)[3]
-  assert drive(memory, 1.4, 3.0) == 80 and raw(memory) == ("maximum_speed:80", 80.0, 0.95, True)
+  assert memory.update(1.2, [80], raw=reading("maximum_speed:80", 0.95)) == pytest.approx(80 / 3.6) and raw(memory)[3]
+  assert drive(memory, 1.4, 3.0) == pytest.approx(80 / 3.6) and raw(memory) == ("maximum_speed:80", 80.0, 0.95, True)
   memory.update(3.2, [], raw=reading("maximum_speed:80", 0.6))  # read again, unsure: the limit held is not from it
   assert raw(memory) == ("maximum_speed:80", 80.0, 0.6, False)
   memory.update(5.0, [0], raw=reading("cancellation", 0.9))
-  assert memory.update(5.2, [0], raw=reading("cancellation", 0.92)) == 0 and raw(memory) == ("cancellation", 0.0, 0.92, True)
+  assert memory.update(5.2, [0], raw=reading("cancellation", 0.92)) == pytest.approx(0 / 3.6) and raw(memory) == ("cancellation", 0.0, 0.92, True)
   town = reading("other_sign:town_entry", 0.85)
   memory.update(8.0, [], ["other_sign:town_entry"], raw=town)
-  assert memory.update(8.2, [], ["other_sign:town_entry"], raw=town) == 50
+  assert memory.update(8.2, [], ["other_sign:town_entry"], raw=town) == pytest.approx(50 / 3.6)
   assert raw(memory) == ("other_sign:town_entry", 0.0, 0.85, True)  # a road sign gives no speed
   # Two at once: the limit is the lower, the surer one read is not taken.
   memory.update(10.0, [80, 60], raw=reading("maximum_speed:80", 0.97))
-  assert memory.update(10.2, [80, 60], raw=reading("maximum_speed:80", 0.97)) == 60 and not memory.raw_taken
+  assert memory.update(10.2, [80, 60], raw=reading("maximum_speed:80", 0.97)) == pytest.approx(60 / 3.6) and not memory.raw_taken
 
 
 def test_memory_a_raw_reading_confirmed_but_overruled_is_not_taken():
-  memory = vision.SpeedLimitMemory()
+  memory = vision.SpeedLimitMemory("CH")
   drive(memory, 0.0, 6.0, road_type="parking", v_ego=2.0)
   higher = reading("maximum_speed:30", 0.9)
   memory.update(10.0, [30], road_type="parking", v_ego=2.0, raw=higher)
-  assert memory.update(10.2, [30], road_type="parking", v_ego=2.0, raw=higher) == vision.GARAGE_LIMIT
+  assert memory.update(10.2, [30], road_type="parking", v_ego=2.0, raw=higher) == pytest.approx(vision.GARAGE_LIMIT / 3.6)
   assert memory.sign_read and raw(memory) == ("maximum_speed:30", 30.0, 0.9, False)  # higher than the car park's
   lower = reading("maximum_speed:5", 0.9)
   memory.update(12.0, [5], road_type="parking", v_ego=2.0, raw=lower)
-  assert memory.update(12.2, [5], road_type="parking", v_ego=2.0, raw=lower) == 5
+  assert memory.update(12.2, [5], road_type="parking", v_ego=2.0, raw=lower) == pytest.approx(5 / 3.6)
   assert raw(memory) == ("maximum_speed:5", 5.0, 0.9, True) and memory.limit_reason == "sign"  # lower: it is taken
   memory = vision.SpeedLimitMemory("SE")
   confirm(memory, 0.0, [90])
   end = reading("other_sign:motorway_end", 0.9)
   memory.update(5.0, [], ["other_sign:motorway_end"], raw=end)
-  assert memory.update(5.2, [], ["other_sign:motorway_end"], raw=end) == 90 and not memory.raw_taken  # it keeps the 90
+  assert memory.update(5.2, [], ["other_sign:motorway_end"], raw=end) == pytest.approx(90 / 3.6) and not memory.raw_taken  # it keeps the 90
 
 
 FOCAL = 1141.5  # the comma 4's road camera, 1344 x 760

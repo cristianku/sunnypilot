@@ -504,11 +504,12 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   # limit), "ramp_end" (the ramp's limit ended on the acceleration lane or the carriageway), "carriageway" (a number read
   # off the carriageways ended on one), "car_park" (a car park seen: the release's garage limit, or its car park limit
   # in the open when the road-type network tells a garage from it), "road_type" (the general limit of the road type
-  # seen where no sign gives one), "zone30" (a 30 zone seen lowers a town's 50 held from a sign); "" before the first.
+  # seen where no sign gives one), "country_change" (jurisdiction changed), "zone30" (a 30 zone seen lowers an implicit
+  # town limit, never an explicit number equal to that limit); "" before the first.
   speedLimitReason @5 :Text;
   # The last sign read that the memory can take, the best of its frame at any confidence, kept until another: its class
   # ("maximum_speed:80", "cancellation" the end of a limit, "other_sign:motorway_start" a road sign...), "" before the
-  # first; the speed it gives (km/h: its number, 0 for the end of a limit or a road sign); the classifier's probability
+  # first; its physical km/h equivalent (0 for an unknown unit, the end of a limit or a road sign); the classifier's probability
   # (0..1; under the release's min_confidence the memory drops it); whether the limit was set from it in its frame
   # (confirmed and not overruled: a higher number in a car park, another sign of the frame, a road sign where it keeps
   # the limit held).
@@ -525,6 +526,11 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   # none is seen in it.
   signDistance @10 :Float32;
   signSize @11 :Float32;
+  # Original written number (never converted), its unit ("km/h", "mph", "unknown") and ISO country at that reading.
+  # rawSignSpeed @7 remains physical km/h; 0 when the raw unit is unknown. Old logs leave these fields empty.
+  rawSignValue @12 :Float32;
+  rawSignUnit @13 :Text;
+  rawSignCountry @14 :Text;
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
