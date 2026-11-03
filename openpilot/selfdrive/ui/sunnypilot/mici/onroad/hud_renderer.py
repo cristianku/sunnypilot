@@ -9,6 +9,7 @@ import pyray as rl
 from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.blind_spot_indicators import BlindSpotIndicators
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.auto_speed import AutoSpeed
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.final_speed_limit import FinalSpeedLimit
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import VisionSpeedLimit
 from openpilot.selfdrive.ui.ui_state import ui_state
 
@@ -18,6 +19,7 @@ class HudRendererSP(HudRenderer):
     super().__init__()
     self.blind_spot_indicators = BlindSpotIndicators()
     self.vision_speed_limit = VisionSpeedLimit()
+    self.final_speed_limit = FinalSpeedLimit()
     self.auto_speed = AutoSpeed()
     self._sp_engaged: bool = False
     self._auto_speed: bool = False
@@ -37,18 +39,22 @@ class HudRendererSP(HudRenderer):
 
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
-    # In the bottom left corner, above the steering wheel while it shows; under the blind spot warning.
-    self.vision_speed_limit.set_lift(self._wheel_alpha_filter.x / (255 * 0.9))
-    self.vision_speed_limit.set_road_lift(self.auto_speed.height_above_final if self._auto_speed else 0)
+    # On the right, clear of the steering wheel and the torque bar: the final limit in the bottom right corner, the
+    # vision square above it with the road type on top, AUTO left of the vision square (in the corner without it),
+    # all under the blind spot warning. The final limit comes after the vision square, so the pulse slides under it.
     self.vision_speed_limit.render(rect)
+    self.final_speed_limit.render(rect)
     if self._auto_speed:
-      self.auto_speed.set_above_final(ui_state.speed_limit_vision_display)
+      self.auto_speed.set_beside_vision(ui_state.speed_limit_vision_display)
       self.auto_speed.render(rect)
     self.blind_spot_indicators.render(rect)
 
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
-    # Set Speed Only Engages: the set speed is not the speed, the green AUTO square says so instead
+    # Set Speed Only Engages: the set speed is not the speed, the green AUTO square says so instead. Its fade still
+    # runs down to 0: drawing_top_icons() reads it, and a value frozen above 0 would keep DMoji and the long indicator
+    # hidden.
     if self._auto_speed:
+      self._set_speed_alpha_filter.update(0)
       return
     super()._draw_set_speed(rect)
 

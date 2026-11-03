@@ -6,14 +6,14 @@ See the LICENSE.md file in the root directory for more details.
 """
 import pyray as rl
 
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE, MARGIN, ROUNDNESS, SEGMENTS, BORDER, \
-  EYE_WIDTH, EYE_HEIGHT, EYE_TOP
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.final_speed_limit import final_box
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE, GAP, ROUNDNESS, SEGMENTS, BORDER, \
+  EYE_WIDTH, EYE_HEIGHT, EYE_TOP, vision_box
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
-GAP = 8
 FONT_SIZE = 22
 V_CRUISE_UNSET = 255.
 
@@ -24,9 +24,10 @@ GREY = rl.Color(145, 155, 149, 255)
 
 
 class AutoSpeed(Widget):
-  """Set Speed Only Engages (Alpha): a green square with an eye and AUTO, in the bottom right corner, above the final
-  limit when that shows, only with the big driving model (the external GPU). The car drives to the limit, the set
-  speed only engages, so the set speed is not shown.
+  """Set Speed Only Engages (Alpha): a green square with an eye and AUTO, on the right of the screen, only with the big
+  driving model (the external GPU): left of the vision square when that shows, above the torque bar, which runs along
+  the bottom up to the final limit in the corner; else in the corner itself. The car drives to the limit, the set speed
+  only engages, so the set speed is not shown. Always drawn, over an alert too: it is a state that holds for the drive.
   Green while Speed Limit Assist drives to a limit; dark with a green border while the set speed holds (not engaged,
   or no limit known yet)."""
   def __init__(self):
@@ -34,14 +35,10 @@ class AutoSpeed(Widget):
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
     self._eye: rl.Texture = gui_app.texture("icons_mici/onroad/eye_fill.png", EYE_WIDTH, EYE_HEIGHT)
     self._driving: bool = False
-    self._above_final: bool = False
+    self._beside_vision: bool = False
 
-  @property
-  def height_above_final(self) -> float:
-    return SIZE + GAP
-
-  def set_above_final(self, above: bool) -> None:
-    self._above_final = above
+  def set_beside_vision(self, beside: bool) -> None:
+    self._beside_vision = beside
 
   def _update_state(self) -> None:
     sm = ui_state.sm
@@ -53,8 +50,11 @@ class AutoSpeed(Widget):
     if not ui_state.speed_limit_auto_speed or ui_state.sm.recv_frame["carState"] < ui_state.started_frame:
       return
 
-    lift = self.height_above_final if self._above_final else 0
-    box = rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE - lift, SIZE, SIZE)
+    if self._beside_vision:
+      vision = vision_box(rect)
+      box = rl.Rectangle(vision.x - GAP - SIZE, vision.y, SIZE, SIZE)
+    else:
+      box = final_box(rect)
     rl.draw_rectangle_rounded(box, ROUNDNESS, SEGMENTS, GREEN if self._driving else DARK_GREY)
     rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, GREEN_LIGHT if self._driving else GREEN)
 
