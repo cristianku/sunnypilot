@@ -745,6 +745,13 @@ def sign_at(distance: float, diameter: float = 0.8, name: str = "maximum_speed:8
   return {"box": [600.0, 100.0, 600.0 + side * 0.7, 100.0 + side], "class": name, "confidence": confidence}
 
 
+@pytest.fixture
+def no_lead(monkeypatch):
+  """The distance as measured, without the lead taken off for the screen (DISTANCE_LEAD_SECONDS, _METRES)."""
+  monkeypatch.setattr(vision, "DISTANCE_LEAD_SECONDS", 0.0)
+  monkeypatch.setattr(vision, "DISTANCE_LEAD_METRES", 0.0)
+
+
 def approach(signs_at, road: str | None = "rural", speed: float = 20.0, seconds: float = 6.0, start: float = 90.0):
   """A drive at speed (m/s) towards a sign start metres ahead, a frame every 0.2 s: signs_at(distance) gives the
   frame's signs. The distance shown at each frame, with the true one."""
@@ -759,6 +766,7 @@ def approach(signs_at, road: str | None = "rural", speed: float = 20.0, seconds:
   return shown
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_from_the_size_of_the_road():
   shown = approach(lambda d: [sign_at(d)] if d > 15 else [])
   assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 0)
@@ -767,6 +775,7 @@ def test_sign_distance_from_the_size_of_the_road():
   assert shown[0][1] == pytest.approx(90, abs=0.01)
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_corrects_a_wrong_size_as_the_sign_grows():
   # A 60 cm sign on a road taken as rural (80 cm): first seen a third too far, then corrected.
   shown = [(true, estimate) for true, estimate in approach(lambda d: [sign_at(d, 0.6)] if 15 < d < 85 else [])
@@ -777,6 +786,7 @@ def test_sign_distance_corrects_a_wrong_size_as_the_sign_grows():
   assert errors == sorted(errors, reverse=True)
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_takes_the_size_of_the_road_kind():
   town = approach(lambda d: [sign_at(d, 0.6)] if d < 60 else [], road="town")
   motorway = approach(lambda d: [sign_at(d, 1.2)] if d < 60 else [], road="motorway")
@@ -785,14 +795,24 @@ def test_sign_distance_takes_the_size_of_the_road_kind():
                    pytest.approx(next(true for true, _ in motorway if true < 60), abs=0.01)]
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_reads_only_round_and_road_signs_read_sure_enough():
-  for name, confidence in (("road_marking:50", 0.9), ("variable_display:80", 0.9), ("other_sign:town_entry", 0.9),
-                           ("maximum_speed:80", 0.5), ("other_sign:motorway_end", 0.5)):
+  for name, confidence in (("road_marking:50", 0.9), ("variable_display:unknown", 0.9), ("other_sign:town_entry", 0.9),
+                           ("maximum_speed:80", 0.5), ("variable_display:80", 0.5), ("other_sign:motorway_end", 0.5)):
     shown = approach(lambda d, name=name, confidence=confidence: [sign_at(d, name=name, confidence=confidence)])
     assert all(estimate == 0 for _, estimate in shown)
   assert approach(lambda d: [sign_at(d, name="cancellation")])[0][1] == pytest.approx(90, abs=0.01)
 
 
+@pytest.mark.usefixtures("no_lead")
+def test_sign_distance_to_a_gantry_led_limit_from_its_own_size():
+  # On a motorway, where a round sign is taken as 1.2 m: the LED display keeps its own diameter.
+  diameter = vision.VARIABLE_DISPLAY_DIAMETER
+  shown = approach(lambda d: [sign_at(d, diameter, "variable_display:100")] if d > 15 else [], road="motorway")
+  assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 0)
+
+
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_to_a_motorway_sign_or_its_end_from_its_height():
   for name in vision.ROAD_SIGN_HEIGHTS:
     height = vision.ROAD_SIGN_HEIGHTS[name]
@@ -807,12 +827,14 @@ def test_sign_distance_to_a_motorway_sign_or_its_end_from_its_height():
     assert shown[-1][1] == pytest.approx(shown[-1][0], abs=2.0)
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_takes_the_nearest_by_its_size_not_the_largest():
   # A round 80 at d and the end of the motorway 20 m farther on, larger on the camera: the 80 is the nearer.
   shown = approach(lambda d: [sign_at(d + 20, 1.7, "other_sign:motorway_end"), sign_at(d)] if d > 15 else [])
   assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 15)
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_takes_the_nearest_sign_and_starts_again_on_another():
   near = approach(lambda d: [sign_at(d + 30), sign_at(d)] if d > 15 else [])
   assert near[0][1] == pytest.approx(90, abs=0.01)
@@ -822,6 +844,7 @@ def test_sign_distance_takes_the_nearest_sign_and_starts_again_on_another():
   assert all(estimate == pytest.approx(true + 50, abs=0.01) for true, estimate in after)
 
 
+@pytest.mark.usefixtures("no_lead")
 def test_sign_distance_ends_some_seconds_after_the_last_sighting():
   # Stopped 30 m before a sign seen once: it holds, then goes after DISTANCE_SECONDS.
   sign_distance = vision.SignDistance(FOCAL)
@@ -829,6 +852,30 @@ def test_sign_distance_ends_some_seconds_after_the_last_sighting():
   assert sign_distance.update(vision.DISTANCE_SECONDS, [], "rural") == pytest.approx(30)
   assert sign_distance.update(vision.DISTANCE_SECONDS + 0.2, [], "rural") == 0
   assert sign_distance.side == 0
+
+
+def test_sign_distance_shown_is_short_by_the_lead():
+  # 0.34 s x 20 m/s + 1.8 m: the screen's zero comes that much before the sign, where it leaves the picture.
+  lead = vision.DISTANCE_LEAD_SECONDS * 20.0 + vision.DISTANCE_LEAD_METRES
+  shown = approach(lambda d: [sign_at(d)] if d > 15 else [])
+  assert all(estimate == pytest.approx(max(0.0, true - lead), abs=0.01) for true, estimate in shown)
+  assert any(0 < true <= lead and estimate == 0 for true, estimate in shown)
+
+
+def test_sign_distance_stopped_takes_off_only_the_metres():
+  sign_distance = vision.SignDistance(FOCAL)
+  sign_distance.add_speed(0.0, 0.0)
+  assert sign_distance.update(0.0, [sign_at(30)], "rural") == pytest.approx(30 - vision.DISTANCE_LEAD_METRES)
+  assert vision.SignDistance(FOCAL).update(0.0, [sign_at(1.5)], "rural") == 0
+
+
+def test_sign_distance_lead_and_display_size_are_settings(monkeypatch):
+  for name in ("DISTANCE_LEAD_SECONDS", "DISTANCE_LEAD_METRES", "VARIABLE_DISPLAY_DIAMETER"):
+    monkeypatch.setattr(vision, name, getattr(vision, name))
+  taken = vision.apply_settings({"distance_lead_seconds": 0.5, "distance_lead_metres": 20.0,
+                                 "variable_display_diameter": 1.6})
+  assert taken == {"distance_lead_seconds": 0.5, "variable_display_diameter": 1.6}
+  assert (vision.DISTANCE_LEAD_SECONDS, vision.DISTANCE_LEAD_METRES, vision.VARIABLE_DISPLAY_DIAMETER) == (0.5, 1.8, 1.6)
 
 
 def test_sign_distance_needs_the_focal_length():
