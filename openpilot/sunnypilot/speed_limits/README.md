@@ -2,7 +2,8 @@
 
 Research source integration on `speed-limits`, 2 November 2026. The implementation
 is present in this checkout; border data, GPS policy, real mph recognition and
-device behavior remain unvalidated. This is not a release ready for installation.
+device behavior remain unvalidated. Without them the unit comes from the country
+of the settings (see Country lookup).
 
 ## Number, unit and physical speed
 
@@ -39,11 +40,19 @@ policy was added to this runtime checkout.** The coarse research asset tested
 offline missed observed crossings; the finer comparison asset has separate
 licensing restrictions. Neither is promoted by integrating the code.
 
-Without a policy or usable borders, numeric readings are blocked. Invalid/stale
-GPS or ambiguous borders also gives unknown. The memory retains its last physical
-limit during unknown intervals, while handling cancellation; it never defaults to
-CH/km/h. A confirmed new jurisdiction clears pending candidates and re-evaluates
-memory/implicit rules without converting an old number again. No new retention
+Until GPS confirms a country, `speedvisiond` uses the country chosen in
+Settings › OSM (`OsmLocationName`, an ISO code), or CH when none is chosen, as
+before the GPS lookup existed. This is the case without a policy or usable
+borders, which is every release today. Once GPS has confirmed a country, invalid
+or stale GPS and ambiguous borders keep that last confirmed country. A country
+outside `vision.sign_unit`'s lists has an unknown unit: its numeric readings are
+blocked. The lists stay explicit, not "km/h everywhere but GB and US", because
+the networks learned European round signs only: elsewhere (Canada, Japan,
+Australia) a reading is not trusted, whatever the unit. The US entry is for a
+later network; today's does not read the rectangular US signs. The memory
+retains its last physical limit during unknown intervals, while handling
+cancellation. A confirmed new jurisdiction clears pending candidates and
+re-evaluates memory/implicit rules without converting an old number again. No new retention
 timeout has been validated or introduced. These state choices are code-tested,
 not device-validated.
 

@@ -7,8 +7,11 @@ import numpy as np
 
 from test_chain import execute
 
+POLICY = {'gps_max_age_s': 2, 'gps_max_accuracy_m': 20, 'border_margin_m': 100, 'confirm_s': 0.1, 'max_sample_gap_s': 1}
 
-def test_daemon_publishes_memory_mps_once(candidate, vision, country):
+
+def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=float('inf'), signs_from=0.0):
+  """The messages speedvisiond sends until 1.3 s: GPS in GB (with a fix until gps_fix_until), a 30 sign from signs_from."""
   class Stop(Exception):
     pass
 
@@ -33,7 +36,8 @@ def test_daemon_publishes_memory_mps_once(candidate, vision, country):
 
   def drain(sock):
     if sock == 'gpsLocationExternal':
-      return [NS(logMonoTime=int((clock.now - 0.01) * 1e9), valid=True, gpsLocationExternal=NS(latitude=0, longitude=0.5, horizontalAccuracy=5, hasFix=True))]
+      g = NS(latitude=0, longitude=0.5, horizontalAccuracy=5, hasFix=clock.now < gps_fix_until)
+      return [NS(logMonoTime=int((clock.now - 0.01) * 1e9), valid=True, gpsLocationExternal=g)]
     return []
 
   class Pub:
@@ -50,12 +54,15 @@ def test_daemon_publishes_memory_mps_once(candidate, vision, country):
     def update(self, *args):
       pass
 
-  settings = {'country_policy': {'gps_max_age_s': 2, 'gps_max_accuracy_m': 20, 'border_margin_m': 100, 'confirm_s': 0.1, 'max_sample_gap_s': 1}}
+  class Params:
+    def get(self, key):
+      return osm_country if key == 'OsmLocationName' else None
+
   files = NS(settings=settings, name='synthetic', finder='finder', classifier='classifier', road_type=None, classes=['maximum_speed:30'])
   signs = [dict(box=[0, 0, 10, 10], confidence=0.99, speed=30.0, **{'class': 'maximum_speed:30'})]
   v = NS(**vars(vision))
   v.SignNetInput = lambda *args: None
-  v.read_signs = lambda *args: signs
+  v.read_signs = lambda *args: signs if clock.now >= signs_from else []
   b = country.OfflineBorders([{'code': 'GB', 'bbox': [0, -1, 1, 1], 'polygons': [[[[0, -1], [1, -1], [1, 1], [0, 1], [0, -1]]]]}])
   env = {
     'os': NS(nice=lambda _: None, environ={}),
@@ -65,7 +72,7 @@ def test_daemon_publishes_memory_mps_once(candidate, vision, country):
     'VisionIpcClient': Client,
     'VisionStreamType': NS(VISION_STREAM_NARROW_ROAD=0),
     'messaging': NS(sub_sock=lambda name, **kw: name, drain_sock=drain, SubMaster=Sub, PubMaster=Pub, new_message=lambda *a, **kw: NS(speedVisionSP=NS())),
-    'Params': lambda: None,
+    'Params': Params,
     'get_gps_location_service': lambda _: 'gpsLocationExternal',
     'cloudlog': NS(warning=lambda _: None, exception=lambda _: None),
     'DEVICE_CAMERAS': {},
@@ -79,5 +86,28 @@ def test_daemon_publishes_memory_mps_once(candidate, vision, country):
   execute(candidate / 'openpilot/sunnypilot/speed_limits/speedvisiond.py', env)
   with pytest.raises(Stop):
     env['main']()
-  assert outputs[-1].speedLimit == pytest.approx(13.4112)
-  assert (outputs[-1].rawSignValue, outputs[-1].rawSignUnit, outputs[-1].rawSignCountry) == (30, 'mph', 'GB')
+  return outputs[-1]
+
+
+def test_daemon_publishes_memory_mps_once(candidate, vision, country):
+  # The country GPS confirms comes before the one of the settings
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH')
+  assert out.speedLimit == pytest.approx(13.4112)
+  assert (out.rawSignValue, out.rawSignUnit, out.rawSignCountry) == (30, 'mph', 'GB')
+
+
+@pytest.mark.parametrize('osm_country, unit, country_code, limit', [
+  ('US', 'mph', 'US', 30 * 0.44704),
+  ('DE', 'km/h', 'DE', 30 / 3.6),
+  (None, 'km/h', 'CH', 30 / 3.6),  # no country chosen: Switzerland
+])
+def test_daemon_without_country_policy_takes_the_settings_country(candidate, vision, country, osm_country, unit, country_code, limit):
+  out = run_daemon(candidate, vision, country, {}, osm_country)
+  assert out.speedLimit == pytest.approx(limit)
+  assert (out.rawSignValue, out.rawSignUnit, out.rawSignCountry) == (30, unit, country_code)
+
+
+def test_daemon_keeps_the_last_gps_country_when_the_fix_is_lost(candidate, vision, country):
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', gps_fix_until=0.7, signs_from=0.8)
+  assert out.speedLimit == pytest.approx(13.4112)
+  assert (out.rawSignValue, out.rawSignUnit, out.rawSignCountry) == (30, 'mph', 'GB')

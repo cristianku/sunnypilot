@@ -15,6 +15,9 @@ the scene does (a garage 10, a car park in the open 20, out of it the street's g
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
 Limit is on or Speed Limit Source is Map Data + Vision or Vision Only. For the logs, each message also says what the limit says
 (speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
+The networks read only the number on a sign; it becomes m/s in the unit of the country (vision.sign_unit: mph in GB
+and the US, km/h in Europe): the last country GPS confirmed when the release has borders and a country policy, else
+the one of the settings.
 While a round sign (a number, the end of a limit) or a motorway or expressway sign or its end is ahead, the distance
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for
 the driver to check; nothing on the car uses it.
@@ -94,13 +97,17 @@ def main() -> None:
   pm = messaging.PubMaster(["speedVisionSP"])
   signnet_input = vision.SignNetInput(client.width, client.height)
   # GPS selects only a country and sign unit. No map speed/road/junction data enters vision.
-  memory = vision.SpeedLimitMemory()
-  gps_service = get_gps_location_service(Params())
+  # Until GPS gives one: the country chosen in Settings › OSM (an ISO code), else Switzerland. Then the last one GPS gave.
+  params = Params()
+  settings_country = params.get("OsmLocationName") or "CH"
+  gps_country: str | None = None
+  memory = vision.SpeedLimitMemory(settings_country)
+  gps_service = get_gps_location_service(params)
   gps = messaging.sub_sock(gps_service, conflate=True)
   borders = OfflineBorders.load()
   country = CountryResolver.from_settings(borders, files.settings.get("country_policy", {}))
   if country is None:
-    cloudlog.warning("speedvisiond: no explicit country policy/borders; numeric readings blocked")
+    cloudlog.warning(f"speedvisiond: no country policy/borders, the country of the settings: {settings_country}")
   memory.garage_known = road_types is not None and "garage" in road_types.classes
   motion = vision.CarMotion()
   distance = vision.SignDistance(focal_length(client.width, client.height))
@@ -128,7 +135,8 @@ def main() -> None:
       g = getattr(event, gps_service)
       fix = GpsFix(event.logMonoTime * 1e-9, g.latitude, g.longitude, g.horizontalAccuracy,
                    bool(event.valid and g.hasFix))
-    memory.set_country(country.update(now, fix) if country is not None else None)
+    gps_country = (country.update(now, fix) if country is not None else None) or gps_country
+    memory.set_country(gps_country or settings_country)
 
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
