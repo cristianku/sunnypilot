@@ -545,13 +545,14 @@ def softmax(logits: np.ndarray) -> np.ndarray:
   return exp / exp.sum()
 
 
-# Unit support is independent of legal implicit defaults. No "all other countries are metric" fallback.
-METRIC_COUNTRIES = frozenset("CH LI DE AT IT FR NL BE LU ES PT IE DK SE NO FI PL CZ SK HU SI HR".split())
-MPH_COUNTRIES = frozenset({"GB", "US"})
+# The unit of the numbers on the signs, independent of the legal implicit defaults: mph in the UK, the US and the places
+# that follow them (crown dependencies, territories, part of the Caribbean, Liberia, Samoa), km/h everywhere else.
+MPH_COUNTRIES = frozenset("GB JE GG IM US PR GU VI AS MP AG AI BS BZ DM FK GD KN KY LC MS SH TC VC VG LR WS".split())
 
 
 def sign_unit(country: str | None) -> str:
-  return "mph" if country in MPH_COUNTRIES else "km/h" if country in METRIC_COUNTRIES else "unknown"
+  """'mph' or 'km/h' for an ISO country code, 'unknown' without one (its numbers are not taken)."""
+  return "unknown" if not country else "mph" if country in MPH_COUNTRIES else "km/h"
 
 
 def sign_mps(number: float, unit: str) -> float | None:

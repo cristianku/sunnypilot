@@ -15,9 +15,9 @@ the scene does (a garage 10, a car park in the open 20, out of it the street's g
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
 Limit is on or Speed Limit Source is Map Data + Vision or Vision Only. For the logs, each message also says what the limit says
 (speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
-The networks read only the number on a sign; it becomes m/s in the unit of the country (vision.sign_unit: mph in GB
-and the US, km/h in Europe): the last country GPS confirmed when the release has borders and a country policy, else
-the one of the settings.
+The networks read only the number on a sign; it becomes m/s in the unit of the country (vision.sign_unit: mph in the UK,
+the US and the places that follow them, km/h elsewhere): the last country GPS confirmed when the release has borders
+and a country policy, else the one of the settings.
 While a round sign (a number, the end of a limit) or a motorway or expressway sign or its end is ahead, the distance
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for
 the driver to check; nothing on the car uses it.

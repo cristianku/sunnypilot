@@ -15,6 +15,12 @@ def test_normalize_before_memory(vision, cc, number, want):
   assert memory.speed_limit == pytest.approx(want)
 
 
+@pytest.mark.parametrize('cc,unit', [('CA', 'km/h'), ('JP', 'km/h'), ('AU', 'km/h'), ('CH', 'km/h'), ('IM', 'mph'), ('PR', 'mph'),
+                                     (None, 'unknown'), ('', 'unknown')])
+def test_km_h_everywhere_but_the_mph_countries(vision, cc, unit):
+  assert vision.sign_unit(cc) == unit
+
+
 def test_unknown_unit_holds_physical_limit_and_accepts_end(vision):
   memory = vision.SpeedLimitMemory('GB')
   confirm(memory, 50)
@@ -22,7 +28,6 @@ def test_unknown_unit_holds_physical_limit_and_accepts_end(vision):
   assert confirm(memory, 30, t=2) == pytest.approx(22.352)
   assert confirm(memory, 0, t=4) == 0
   assert memory.limit_state == 'unknown'
-  assert confirm(vision.SpeedLimitMemory('ZZ'), 30) == 0
   assert confirm(vision.SpeedLimitMemory(), 30) == 0
 
 
