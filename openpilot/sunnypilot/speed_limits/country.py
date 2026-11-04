@@ -5,11 +5,27 @@ Natural Earth borders are a research asset, with significant boundary error.
 """
 
 import gzip
+import hashlib
 import json
 import math
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def release_context(config_path=None):
+  """Load a self-contained, digest-checked release resource; never fetch at runtime."""
+  config_path = Path(config_path) if config_path else Path(__file__).with_name('resources') / 'country-context.json'
+  try:
+    doc = json.loads(config_path.read_text())
+    asset = config_path.parent / doc['asset']
+    if asset.resolve().parent != config_path.parent.resolve():
+      return None
+    if hashlib.sha256(asset.read_bytes()).hexdigest() != doc['sha256']:
+      return None
+    return CountryResolver.from_settings(OfflineBorders.load(asset), doc['policy'])
+  except (OSError, KeyError, TypeError, ValueError):
+    return None
 
 
 @dataclass(frozen=True)
