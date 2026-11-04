@@ -159,7 +159,7 @@ LIMIT_REASONS = (
 LIMIT_STATES = ("limit", "none", "unknown")
 
 # The distance to the sign ahead (SignDistance, speedVisionSP.signDistance): shown on the screen for the driver to
-# check, and logged; nothing on the car reads it. A round sign (ROUND_SIGNS: a number, the end of a limit) of side s
+# check, logged, and where a limit read on that sign starts (LimitAhead). A round sign (ROUND_SIGNS: a number, the end of a limit) of side s
 # pixels is f * D / s metres away, f the road camera's focal length in pixels and D the sign's diameter, by the kind of
 # road the memory knows (SIGN_DIAMETERS, the Swiss sizes; DEFAULT_SIGN_DIAMETER when not known). A motorway or
 # expressway sign or its end (ROAD_SIGN_HEIGHTS) is measured the same way by its height, which stays when it is seen
@@ -193,6 +193,8 @@ DISTANCE_LEAD_METRES = 1.8
 # its last side (the car drives towards it). Else another sign, its sightings from scratch.
 TRACK_SECONDS = 2.0
 TRACK_SHRINK = 0.8
+# The metres the distance to the same sign may correct LimitAhead's count upwards: its size on the camera wavers.
+LIMIT_AHEAD_SLACK = 5.0
 TRACK_SIGHTINGS = 50  # the last 10 s of sightings at most (stopped in front of a sign)
 ODOMETER_MAX_STEP = 0.1  # seconds: a longer gap between two carState messages adds nothing
 
@@ -908,6 +910,13 @@ def _lit_display(name: str) -> bool:
   return kind == VARIABLE_DISPLAY and value.isdigit()
 
 
+def _limit_from_sign(reason: str, sign_class: str) -> bool:
+  """Whether the limit of the rule reason comes from a sign of the kind sign_class (SignDistance's)."""
+  kind = sign_class.partition(":")[0]
+  return (reason == "sign" and kind in ("maximum_speed", VARIABLE_DISPLAY)) or \
+    (reason == "end_sign" and kind == "cancellation") or (reason == "road_sign" and sign_class in ROAD_SIGN_HEIGHTS)
+
+
 class SignDistance:
   """The distance (m) to the sign ahead the classifier reads sure enough (ROUND_SIGNS, a gantry's LED limit,
   ROAD_SIGN_HEIGHTS; the nearest of a frame), 0 without one or with a focal length of 0: see SIGN_DIAMETERS. The camera
@@ -916,7 +925,7 @@ class SignDistance:
     self.focal_length = focal_length
     self.odometer = 0.0  # metres driven since the start
     self._speed: tuple[float, float] | None = None  # the last carState: its time (s), vEgo (m/s)
-    self._class = ""
+    self.sign_class = ""  # the sign of the distance, kept after it is passed
     self._sightings: list[tuple[float, float]] = []  # the sign's: odometer, side (frame pixels)
     self._seen_at = -math.inf
     self._distance = 0.0  # at the last sighting
@@ -965,10 +974,10 @@ class SignDistance:
     self.side = 0.0
     if seen and self.focal_length > 0:  # 0: a camera not known
       _, side, size, spread, name = min(seen)  # the nearest: a road sign is larger than a round one
-      if name != self._class or now - self._seen_at > TRACK_SECONDS or not self._sightings or \
+      if name != self.sign_class or now - self._seen_at > TRACK_SECONDS or not self._sightings or \
           side < TRACK_SHRINK * self._sightings[-1][1]:
         self._sightings = []
-      self._class, self._seen_at, self.side = name, now, side
+      self.sign_class, self._seen_at, self.side = name, now, side
       self._sightings = self._sightings[-(TRACK_SIGHTINGS - 1):] + [(self.odometer, side)]
       self._distance = self._fitted(size, spread)
     if now - self._seen_at > DISTANCE_SECONDS:
@@ -976,3 +985,37 @@ class SignDistance:
     speed = max(0.0, self._speed[1]) if self._speed is not None else 0.0
     lead = DISTANCE_LEAD_SECONDS * speed + DISTANCE_LEAD_METRES
     return max(0.0, self._distance - (self.odometer - self._sightings[-1][0]) - lead)
+
+
+class LimitAhead:
+  """A limit read on a sign ahead starts at the sign, as the map's does: until the car gets there the limit held stays
+  and the new one is the limit ahead (speedVisionSP.speedLimitAhead, speedLimitAheadDistance), for sunnypilot's
+  resolver to take it as the map's limit ahead. A limit no sign ahead gives applies at once: another rule, a sign with
+  no distance (a town sign, a camera not known), or the first limit, with none held to keep.
+  From the distance when the limit changes the metres driven count down: SignDistance moves on to the next sign and
+  can show a larger distance than the one left, so it only corrects the count on the same sign, and not upwards."""
+  def __init__(self):
+    self.limit = 0.0  # the limit held (m/s), speedVisionSP.speedLimit
+    self.distance = 0.0  # the metres left to the sign, 0 with no limit ahead
+    self._target = 0.0  # the memory's limit, the limit ahead while distance > 0
+    self._class = ""  # the sign it was read on
+    self._odometer = 0.0  # at the last update
+
+  @property
+  def ahead(self) -> float:
+    return self._target if self.distance > 0 else 0.0
+
+  def update(self, limit: float, reason: str, sign_distance: float, sign_class: str, odometer: float) -> float:
+    """limit, reason: the memory's (SpeedLimitMemory.limit_reason); sign_distance, sign_class, odometer: SignDistance's.
+    The limit held."""
+    if limit != self._target:
+      self._target, self._class = limit, sign_class
+      self.distance = sign_distance if self.limit > 0 and _limit_from_sign(reason, sign_class) else 0.0
+    else:
+      self.distance -= odometer - self._odometer
+      if sign_class == self._class and sign_distance <= self.distance + LIMIT_AHEAD_SLACK:
+        self.distance = sign_distance
+    self._odometer = odometer
+    if limit == self.limit or self.distance <= 0:
+      self.limit, self.distance = limit, 0.0
+    return self.limit

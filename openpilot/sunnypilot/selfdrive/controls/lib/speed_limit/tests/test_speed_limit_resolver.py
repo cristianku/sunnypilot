@@ -168,18 +168,21 @@ class TestSpeedLimitResolverValidation(OpenpilotTestCase):
     self.assertAlmostEqual(resolver.distance, distance, delta=0.1)
 
 
-def setup_vision_sm_mock(mocker, car, vision, map_limit, vision_alive=True):
+def setup_vision_sm_mock(mocker, car, vision, map_limit, vision_alive=True, vision_ahead=0., vision_ahead_distance=0.,
+                         vision_age=0.):
   """carStateSP, speedVisionSP and liveMapDataSP with the given limits (0: none)."""
   sources = {
     'carState': create_mock({'gasPressed': False, 'brakePressed': False, 'standstill': False}, mocker),
     'carStateSP': create_mock({'speedLimit': car}, mocker),
-    'speedVisionSP': create_mock({'speedLimit': vision}, mocker),
+    'speedVisionSP': create_mock({'speedLimit': vision, 'speedLimitAhead': vision_ahead,
+                                  'speedLimitAheadDistance': vision_ahead_distance}, mocker),
     'liveMapDataSP': create_mock({'speedLimit': map_limit, 'speedLimitValid': map_limit > 0., 'speedLimitAhead': 0.,
                                   'speedLimitAheadValid': 0., 'speedLimitAheadDistance': 0.}, mocker),
   }
   sm_mock = mocker.MagicMock()
   sm_mock.__getitem__.side_effect = lambda key: sources[key]
-  sm_mock.recv_time = {'gpsLocation': time.monotonic(), 'liveMapDataSP': time.monotonic()}
+  sm_mock.recv_time = {'gpsLocation': time.monotonic(), 'liveMapDataSP': time.monotonic(),
+                       'speedVisionSP': time.monotonic() - vision_age}
   sm_mock.alive = {'speedVisionSP': vision_alive}
   return sm_mock
 
@@ -212,6 +215,24 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     resolver.update(20., setup_vision_sm_mock(mocker, car, vision, map_limit))
     assert resolver.speed_limit == expected
     assert resolver.source == expected_source
+
+  @parameterized.expand([
+    (80., 50., 300., 0., 80., 0.),  # beyond the braking distance: still the limit held
+    (80., 50., 50., 0., 50., 50.),  # within it: the lower limit ahead, with its distance
+    (80., 50., 50., 1., 50., 50. - 80 * CV.KPH_TO_MS),  # less the distance driven since speedvisiond sent it
+    (45., 50., 50., 0., 50., 50.),  # already slower than the limit ahead: it holds
+    (80., 120., 30., 0., 80., 0.),  # a higher limit waits for the sign, as the map's
+    (80., 0., 30., 0., 80., 0.),  # nothing ahead
+  ], names=["v_kph", "ahead_kph", "ahead_distance", "age", "limit_kph", "distance"])
+  def test_vision_limit_ahead(self, resolver_class, v_kph, ahead_kph, ahead_distance, age, limit_kph, distance, mocker):
+    resolver = resolver_class()
+    resolver.policy = Policy.vision_only
+    resolver.update(v_kph * CV.KPH_TO_MS, setup_vision_sm_mock(mocker, 0., 80 * CV.KPH_TO_MS, 0.,
+                                                               vision_ahead=ahead_kph * CV.KPH_TO_MS,
+                                                               vision_ahead_distance=ahead_distance, vision_age=age))
+    assert resolver.source == SpeedLimitSource.vision
+    self.assertAlmostEqual(resolver.speed_limit, limit_kph * CV.KPH_TO_MS, places=5)
+    self.assertAlmostEqual(resolver.distance, distance, delta=0.1)
 
   def test_stale_vision_ignored(self, resolver_class, mocker):
     # speedvisiond stopped: its last message is never used, the map takes over.

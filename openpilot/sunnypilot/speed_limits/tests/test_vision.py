@@ -882,6 +882,115 @@ def test_sign_distance_needs_the_focal_length():
   assert vision.SignDistance(0.0).update(0.0, [sign_at(30)], "rural") == 0
 
 
+def held(limit_ahead, limit=80 / 3.6, reason="sign"):
+  """limit_ahead holding limit, set with no sign ahead."""
+  limit_ahead.update(limit, reason, 0.0, "", 0.0)
+  return limit_ahead
+
+
+def test_limit_ahead_the_first_limit_applies_at_once():
+  limit_ahead = vision.LimitAhead()
+  assert limit_ahead.update(80 / 3.6, "sign", 30.0, "maximum_speed:80", 0.0) == 80 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (0, 0)
+
+
+@pytest.mark.parametrize("reason, sign_class", [("sign", "maximum_speed:120"), ("sign", "variable_display:120"),
+                                                ("end_sign", "cancellation"), ("road_sign", "other_sign:motorway_start")])
+def test_limit_ahead_a_sign_holds_until_the_car_gets_there(reason, sign_class):
+  limit_ahead = held(vision.LimitAhead())
+  assert limit_ahead.update(120 / 3.6, reason, 30.0, sign_class, 100.0) == 80 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (120 / 3.6, 30.0)
+  assert limit_ahead.update(120 / 3.6, reason, 12.0, sign_class, 118.0) == 80 / 3.6
+  assert limit_ahead.distance == 12.0
+  assert limit_ahead.update(120 / 3.6, reason, 0.0, sign_class, 130.0) == 120 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (0, 0)
+
+
+def test_limit_ahead_the_end_of_a_limit_with_no_general_limit_holds_too():
+  limit_ahead = held(vision.LimitAhead())
+  assert limit_ahead.update(0.0, "end_sign", 30.0, "cancellation", 100.0) == 80 / 3.6
+  assert limit_ahead.ahead == 0
+  assert limit_ahead.update(0.0, "end_sign", 0.0, "cancellation", 130.0) == 0
+
+
+@pytest.mark.parametrize("reason, sign_distance, sign_class", [
+  ("road_type", 30.0, "maximum_speed:120"),  # another rule
+  ("carriageway", 30.0, "maximum_speed:120"),
+  ("sign", 0.0, "maximum_speed:120"),  # the sign is at the car, or the camera is not known
+  ("road_sign", 30.0, "maximum_speed:120"),  # a town sign has no distance: the one shown is of another sign
+  ("end_sign", 30.0, "maximum_speed:120"),
+  ("sign", 30.0, ""),
+])
+def test_limit_ahead_applies_at_once_with_no_sign_ahead(reason, sign_distance, sign_class):
+  limit_ahead = held(vision.LimitAhead())
+  assert limit_ahead.update(120 / 3.6, reason, sign_distance, sign_class, 100.0) == 120 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (0, 0)
+
+
+def test_limit_ahead_counts_the_metres_when_the_sign_is_lost_or_another_is_seen():
+  limit_ahead = held(vision.LimitAhead())
+  limit_ahead.update(120 / 3.6, "sign", 30.0, "maximum_speed:120", 100.0)
+  assert limit_ahead.update(120 / 3.6, "sign", 150.0, "maximum_speed:60", 110.0) == 80 / 3.6
+  assert limit_ahead.distance == 20.0
+  assert limit_ahead.update(120 / 3.6, "sign", 140.0, "maximum_speed:60", 130.0) == 120 / 3.6
+
+
+def test_limit_ahead_the_same_class_further_on_is_the_next_sign():
+  limit_ahead = held(vision.LimitAhead())
+  limit_ahead.update(120 / 3.6, "sign", 30.0, "maximum_speed:120", 100.0)
+  limit_ahead.update(120 / 3.6, "sign", 33.0, "maximum_speed:120", 101.0)  # the size wavers: the same sign
+  assert limit_ahead.distance == 33.0
+  assert limit_ahead.update(120 / 3.6, "sign", 200.0, "maximum_speed:120", 140.0) == 120 / 3.6
+
+
+def test_limit_ahead_stopped_it_waits_for_the_sign():
+  limit_ahead = held(vision.LimitAhead())
+  limit_ahead.update(120 / 3.6, "sign", 30.0, "maximum_speed:120", 100.0)
+  for _ in range(5):
+    assert limit_ahead.update(120 / 3.6, "sign", 30.0, "maximum_speed:120", 100.0) == 80 / 3.6
+
+
+def test_limit_ahead_a_new_reading_takes_its_place():
+  limit_ahead = held(vision.LimitAhead())
+  limit_ahead.update(60 / 3.6, "sign", 30.0, "maximum_speed:60", 100.0)
+  assert limit_ahead.update(40 / 3.6, "sign", 50.0, "maximum_speed:40", 110.0) == 80 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (40 / 3.6, 50.0)
+
+
+def test_limit_ahead_ends_when_the_memory_goes_back_to_the_limit_held():
+  limit_ahead = held(vision.LimitAhead())
+  limit_ahead.update(60 / 3.6, "sign", 30.0, "maximum_speed:60", 100.0)
+  assert limit_ahead.update(80 / 3.6, "sign", 20.0, "maximum_speed:80", 110.0) == 80 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (0, 0)
+
+
+def test_limit_ahead_another_rule_during_the_wait_applies_at_once():
+  limit_ahead = held(vision.LimitAhead())
+  limit_ahead.update(60 / 3.6, "sign", 30.0, "maximum_speed:60", 100.0)
+  assert limit_ahead.update(30 / 3.6, "car_park", 20.0, "maximum_speed:60", 110.0) == 30 / 3.6
+  assert (limit_ahead.ahead, limit_ahead.distance) == (0, 0)
+
+
+def test_limit_ahead_with_a_sign_distance_from_the_camera():
+  """The limit held until the true sign, through SignDistance's real distance."""
+  limit_ahead = held(vision.LimitAhead())
+  sign_distance = vision.SignDistance(FOCAL)
+  released = None
+  for step in range(int(6 * 100) + 1):
+    t = step / 100
+    sign_distance.add_speed(t, 20.0)
+    if step % 20 == 0:
+      true = 90.0 - sign_distance.odometer
+      signs = [sign_at(true, name="maximum_speed:120")] if true > 10 else []
+      shown = sign_distance.update(t, signs, "rural")
+      limit = limit_ahead.update(120 / 3.6, "sign", shown, sign_distance.sign_class, sign_distance.odometer)
+      if t < 0.5:
+        assert limit == 80 / 3.6 or not shown
+      if limit == 120 / 3.6 and released is None:
+        released = true
+  assert released is not None and -5 < released < 20
+
+
 def test_odometer_skips_gaps_in_the_car_state():
   sign_distance = vision.SignDistance(FOCAL)
   for t, v in ((0.0, 10.0), (0.01, 10.0), (0.02, 10.0), (5.0, 10.0), (5.01, -1.0), (5.02, 0.0)):

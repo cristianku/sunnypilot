@@ -73,7 +73,8 @@ class VisionSpeedLimit(Widget):
 
   def _update_state(self) -> None:
     sm = ui_state.sm
-    speed_limit = sm['speedVisionSP'].speedLimit if sm.alive['speedVisionSP'] else 0.
+    # The number just read at once, also while it is the limit ahead: this square shows what the camera reads
+    speed_limit = (sm['speedVisionSP'].speedLimitAhead or sm['speedVisionSP'].speedLimit) if sm.alive['speedVisionSP'] else 0.
     if sm.alive['speedVisionSP'] and sm.updated['speedVisionSP'] and sm['speedVisionSP'].signRead:
       self._pulse_at = rl.get_time()
     speed_conv = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH

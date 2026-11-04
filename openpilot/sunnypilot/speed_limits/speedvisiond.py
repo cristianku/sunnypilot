@@ -20,7 +20,8 @@ the US and the places that follow them, km/h elsewhere): the last country GPS co
 and a country policy, else the one of the settings.
 While a round sign (a number, the end of a limit) or a motorway or expressway sign or its end is ahead, the distance
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for
-the driver to check; nothing on the car uses it.
+the driver to check. A limit read on such a sign starts at the sign, as the map's: until the car gets there it is the
+limit ahead, with its distance (speedLimitAhead, speedLimitAheadDistance, vision.LimitAhead).
 """
 import os
 os.environ['GMMU'] = '0'
@@ -111,6 +112,7 @@ def main() -> None:
   memory.garage_known = road_types is not None and "garage" in road_types.classes
   motion = vision.CarMotion()
   distance = vision.SignDistance(focal_length(client.width, client.height))
+  limit_ahead = vision.LimitAhead()
   v_ego: float | None = None
   next_frame = 0.0
   while True:
@@ -147,14 +149,18 @@ def main() -> None:
                        memory.board_age(now))
     road_type = road_types.road_type if road_types is not None else None
     speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
+    sign_distance = distance.update(now, signs, memory.road)
+    speed_limit = limit_ahead.update(speed_limit, memory.limit_reason, sign_distance, distance.sign_class, distance.odometer)
 
     msg = messaging.new_message("speedVisionSP", valid=True)
     msg.speedVisionSP.speedLimit = float(speed_limit)
+    msg.speedVisionSP.speedLimitAhead = float(limit_ahead.ahead)
+    msg.speedVisionSP.speedLimitAheadDistance = float(limit_ahead.distance)
     msg.speedVisionSP.modelName = files.name
     msg.speedVisionSP.signRead = memory.sign_read
     msg.speedVisionSP.roadType = road_type or ""
     memory.fill_log(msg.speedVisionSP)  # for the logs: why the limit is what it is, the last sign read taken or not
-    msg.speedVisionSP.signDistance = distance.update(now, signs, memory.road)
+    msg.speedVisionSP.signDistance = sign_distance
     msg.speedVisionSP.signSize = distance.side
     pm.send("speedVisionSP", msg)
 

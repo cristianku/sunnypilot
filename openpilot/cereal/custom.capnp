@@ -520,8 +520,8 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
 
   # The distance (m) to the sign ahead (a number, the end of a limit, a motorway or expressway sign or its end; the
   # nearest of the frame by its size), from its size on the camera and the metres driven since (speed_limits/vision.py:
-  # SignDistance): the screen shows it for the driver to check, nothing else reads it on the car; 0 without one, once
-  # the car has passed it, or 15 s after it was last seen.
+  # SignDistance): the screen shows it for the driver to check, and speedLimitAheadDistance starts from it; 0 without
+  # one, once the car has passed it, or 15 s after it was last seen.
   # signSize: the side (frame pixels: a round sign's larger, a road sign's height) of that sign in this frame, 0 when
   # none is seen in it.
   signDistance @10 :Float32;
@@ -531,6 +531,12 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   rawSignValue @12 :Float32;
   rawSignUnit @13 :Text;
   rawSignCountry @14 :Text;
+  # A limit read on a sign ahead starts at the sign, as the map's does (speed_limits/vision.py: LimitAhead): until the
+  # car gets there speedLimit stays the limit held, and the new one is here with the metres left, the same two data as
+  # liveMapDataSP's for sunnypilot's resolver. 0 with none ahead. speedLimitState and speedLimitReason already say the
+  # new limit.
+  speedLimitAhead @15 :Float32;
+  speedLimitAheadDistance @16 :Float32;
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
