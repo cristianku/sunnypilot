@@ -33,9 +33,7 @@ class HudRendererSP(HudRenderer):
       self._chestnut_fade_time = rl.get_time() if sp_engaged else 0
     self._sp_engaged = sp_engaged
 
-    # as the planner: only with the big driving model (the external GPU), else the set speed is the maximum again
-    sm = ui_state.sm
-    self._auto_speed = ui_state.speed_limit_auto_speed and sm.alive['modelV2'] and sm['modelV2'].big
+    self._auto_speed = ui_state.speed_limit_auto_speed
 
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
