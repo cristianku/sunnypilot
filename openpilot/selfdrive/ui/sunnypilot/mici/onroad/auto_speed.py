@@ -28,7 +28,7 @@ class AutoSpeed(Widget):
   square when that shows, above the torque bar, which runs along the bottom up to the final limit in the corner; else in
   the corner itself. The car drives to the limit, the set speed only engages, so the set speed is not shown. Always
   drawn, over an alert too: it is a state that holds for the drive. Green while Speed Limit Assist drives to a limit;
-  dark with a green border while the set speed holds (not engaged, or no limit known yet)."""
+  dark with a green border while no limit is in force (not engaged, or no limit known)."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
