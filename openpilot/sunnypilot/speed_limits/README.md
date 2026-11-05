@@ -89,6 +89,12 @@ Two Developer switches, both off by default and applied from the next drive. Wit
 Both need `VISION_STREAM_NARROW_ROAD_FULL` from `camerad`. Without that stream `encoderd` records as usual and
 `speedvisiond` reads the low frames.
 
+`camerad` gives that stream with either switch on and a sensor that scales (OS04C10; the OX03C10 has one size and stays
+as it is). The road camera then goes through the BPS, as the cabin does, and one pass writes both sizes of a frame: the
+full one into the new stream, sent first, the low one where it always was. So the driving model reads a BPS picture too:
+another debayer, no vignetting correction, about 7 ms later. It costs about 250 MB of memory. With both switches off
+the road camera stays on the IFE.
+
 ## Tests in this checkout
 
 From the repository root, with the project's Python 3.12 test environment:

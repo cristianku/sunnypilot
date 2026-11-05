@@ -102,10 +102,10 @@ class DeveloperLayoutMici(NavScroller):
       self._long_maneuver_toggle,
       self._lat_maneuver_toggle,
       self._alpha_long_toggle,
-      self._debug_mode_toggle,
-      self._navigation_toggle,
       self._record_full_toggle,
       self._read_full_toggle,
+      self._debug_mode_toggle,
+      self._navigation_toggle,
     ])
 
     # Toggle lists
