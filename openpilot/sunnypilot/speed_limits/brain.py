@@ -35,13 +35,18 @@ class BrainReader:
     self.memory_gap = contract["step"]["memory_gap_seconds"]
     self.image = vision.RoadTypeInput(width, height)
     self.signs = brain_inputs.SignInputs(vision)
+    self.class_plate = vision.class_plate if contract["step"].get("plates", False) else None
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
     self.last_step = -math.inf
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
-    """A frame's signs as vision.read_signs gives them."""
-    self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
+    """A frame's signs as vision.read_signs gives them. Their plates only to a brain trained with plates (its contract's
+    step): to another one, trained with the plate unknown on every frame, a plate would change the speed at random."""
+    if self.class_plate is None:
+      self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
+    else:
+      self.signs.add(now, [(sign["class"], sign["confidence"], self.class_plate(sign["class"])) for sign in signs])
 
   def due(self, now: float) -> bool:
     return now - self.last_step >= self.period

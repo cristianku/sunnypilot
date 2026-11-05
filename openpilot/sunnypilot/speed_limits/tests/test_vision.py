@@ -140,12 +140,19 @@ def test_classifier_input_cuts_the_same_window_of_the_scene():
   assert np.allclose(x, white, atol=1e-5)
 
 
-@pytest.mark.parametrize("name, speed", [("maximum_speed:80", 80), ("variable_display:100", 100), ("zone:30", 30),
+@pytest.mark.parametrize("name, speed", [("maximum_speed:80", 80), ("maximum_speed_hours:30", 30),
+                                         ("variable_display:100", 100), ("zone:30", 30),
                                          ("road_marking:30", 30), ("cancellation", 0), ("maximum_speed:unknown", None),
                                          ("zone:unknown", None), ("other_sign:give_way", None), ("not_a_sign", None),
                                          ("unreadable", None)])
 def test_class_speed(name, speed):
   assert vision.class_speed(name) == speed
+
+
+@pytest.mark.parametrize("name, plate", [("maximum_speed_hours:30", "time"), ("maximum_speed:30", None), ("zone:30", None),
+                                         ("cancellation", None), ("not_a_sign", None)])
+def test_class_plate(name, plate):
+  assert vision.class_plate(name) == plate
 
 
 def test_read_signs():
@@ -846,6 +853,24 @@ def test_sign_distance_reads_only_round_and_road_signs_read_sure_enough():
   assert approach(lambda d: [sign_at(d, name="cancellation")])[0][1] == pytest.approx(90, abs=0.01)
 
 
+def hours_sign_at(distance: float, name: str = "maximum_speed_hours:30") -> dict:
+  """A disc of 0.8 m with its plate below it: the box is as wide as the disc and half as tall again."""
+  side = FOCAL * 0.8 / distance
+  return {"box": [600.0, 100.0, 600.0 + side, 100.0 + 1.5 * side], "class": name, "confidence": 0.9}
+
+
+@pytest.mark.usefixtures("no_lead")
+def test_sign_distance_to_a_number_with_hours_from_its_width():
+  shown = approach(lambda d: [hours_sign_at(d)] if d > 15 else [])
+  assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if true > 0)
+
+
+@pytest.mark.usefixtures("no_lead")
+def test_sign_distance_starts_again_when_the_plate_is_read():
+  shown = approach(lambda d: [hours_sign_at(d, "maximum_speed:30" if d > 50 else "maximum_speed_hours:30")] if d > 15 else [])
+  assert all(estimate == pytest.approx(true, abs=0.01) for true, estimate in shown if 15 < true <= 50)
+
+
 @pytest.mark.usefixtures("no_lead")
 def test_sign_distance_to_a_gantry_led_limit_from_its_own_size():
   # On a motorway, where a round sign is taken as 1.2 m: the LED display keeps its own diameter.
@@ -936,8 +961,9 @@ def test_limit_ahead_the_first_limit_applies_at_once():
   assert (limit_ahead.ahead, limit_ahead.distance) == (0, 0)
 
 
-@pytest.mark.parametrize("reason, sign_class", [("sign", "maximum_speed:120"), ("sign", "variable_display:120"),
-                                                ("end_sign", "cancellation"), ("road_sign", "other_sign:motorway_start")])
+@pytest.mark.parametrize("reason, sign_class", [("sign", "maximum_speed:120"), ("sign", "maximum_speed_hours:120"),
+                                                ("sign", "variable_display:120"), ("end_sign", "cancellation"),
+                                                ("road_sign", "other_sign:motorway_start")])
 def test_limit_ahead_a_sign_holds_until_the_car_gets_there(reason, sign_class):
   limit_ahead = held(vision.LimitAhead())
   assert limit_ahead.update(120 / 3.6, reason, 30.0, sign_class, 100.0) == 80 / 3.6

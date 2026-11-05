@@ -34,7 +34,10 @@ MIN_CONFIDENCE = 0.7
 CONFIRM_FRAMES = 2
 CONFIRM_SECONDS = 1.5
 
-SPEED_KINDS = ("maximum_speed", "variable_display", "zone", "road_marking")
+# A number valid at some hours, its plate below it, one box around both. To the rules it is its number: no code turns the
+# hours into a limit, that is the brain's (class_plate).
+MAXIMUM_SPEED_HOURS = "maximum_speed_hours"
+SPEED_KINDS = ("maximum_speed", MAXIMUM_SPEED_HOURS, "variable_display", "zone", "road_marking")
 CANCELLATION = "cancellation"
 
 # The general limits that hold where no number is signed (km/h; None: no general limit), by country, for the kind of
@@ -161,7 +164,8 @@ LIMIT_STATES = ("limit", "none", "unknown")
 # The distance to the sign ahead (SignDistance, speedVisionSP.signDistance): shown on the screen for the driver to
 # check, logged, and where a limit read on that sign starts (LimitAhead). A round sign (ROUND_SIGNS: a number, the end of a limit) of side s
 # pixels is f * D / s metres away, f the road camera's focal length in pixels and D the sign's diameter, by the kind of
-# road the memory knows (SIGN_DIAMETERS, the Swiss sizes; DEFAULT_SIGN_DIAMETER when not known). A motorway or
+# road the memory knows (SIGN_DIAMETERS, the Swiss sizes; DEFAULT_SIGN_DIAMETER when not known). The box of a number with
+# hours holds the plate too: its width is taken as the disc's side. A motorway or
 # expressway sign or its end (ROAD_SIGN_HEIGHTS) is measured the same way by its height, which stays when it is seen
 # from the side: its formats differ more (on our drives about 1.3 m on a post and 2.1 m on a gantry, still to be
 # checked), so its size is held more loosely (ROAD_SIGN_SPREAD). Of the signs of a frame, the nearest by its size.
@@ -176,7 +180,7 @@ LIMIT_STATES = ("limit", "none", "unknown")
 # zero came late (Data › Sign distance, 28 signs marked by hand): the frame is already old when it is read, the networks
 # take their time before the message goes, each value stays on the screen for speedvisiond's PERIOD (0.2 s), and the zero
 # a person marks is the frame where the sign leaves the picture, a few metres before the car passes it.
-ROUND_SIGNS = ("maximum_speed", "cancellation")
+ROUND_SIGNS = ("maximum_speed", MAXIMUM_SPEED_HOURS, "cancellation")
 VARIABLE_DISPLAY = "variable_display"
 VARIABLE_DISPLAY_DIAMETER = 1.4
 SIGN_DIAMETERS = {"town": 0.6, "zone30": 0.6, "rural": 0.8, "expressway": 1.0, "motorway": 1.2}
@@ -585,14 +589,20 @@ def sign_mps(number: float, unit: str) -> float | None:
 
 
 def class_speed(name: str) -> float | None:
-  """The written number a class gives (unit-free): its number for a speed sign, a variable display, a zone or a marking on the
-  road; 0 for the end of a limit; None for the others (other signs, unreadable, not a sign)."""
+  """The written number a class gives (unit-free): its number for a speed sign (with hours or not), a variable display, a
+  zone or a marking on the road; 0 for the end of a limit; None for the others (other signs, unreadable, not a sign)."""
   if name == CANCELLATION:
     return 0.0
   kind, _, value = name.partition(":")
   if kind in SPEED_KINDS and value.isdigit():
     return float(value)
   return None
+
+
+def class_plate(name: str) -> str | None:
+  """The plate a class says is below its number, one of brain_inputs.PLATES: "time" for a number with hours; None when it
+  does not say."""
+  return "time" if name.partition(":")[0] == MAXIMUM_SPEED_HOURS else None
 
 
 def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finder, classifier,
@@ -923,7 +933,7 @@ def _lit_display(name: str) -> bool:
 def _limit_from_sign(reason: str, sign_class: str) -> bool:
   """Whether the limit of the rule reason comes from a sign of the kind sign_class (SignDistance's)."""
   kind = sign_class.partition(":")[0]
-  return (reason == "sign" and kind in ("maximum_speed", VARIABLE_DISPLAY)) or \
+  return (reason == "sign" and kind in ("maximum_speed", MAXIMUM_SPEED_HOURS, VARIABLE_DISPLAY)) or \
     (reason == "end_sign" and kind == "cancellation") or (reason == "road_sign" and sign_class in ROAD_SIGN_HEIGHTS)
 
 
@@ -951,15 +961,16 @@ class SignDistance:
 
   def _measured(self, sign: dict, road: str | None) -> tuple[float, float, float, float, str]:
     """A sign of the frame: the distance its size gives, its side (frame pixels), its size (m), how loosely the size is
-    held, its class. Seen from the side a round sign is narrower, never lower; a road sign's height stays."""
+    held, its class. Seen from the side a round sign is narrower, never lower; a road sign's height stays; a number with
+    hours is taller by its plate, so its width."""
     x1, y1, x2, y2 = sign["box"]
     if sign["class"] in ROAD_SIGN_HEIGHTS:
       side, size, spread = y2 - y1, ROAD_SIGN_HEIGHTS[sign["class"]], ROAD_SIGN_SPREAD
     elif sign["class"].partition(":")[0] == VARIABLE_DISPLAY:
       side, size, spread = max(x2 - x1, y2 - y1), VARIABLE_DISPLAY_DIAMETER, DISTANCE_DIAMETER_SPREAD
     else:
-      side, size, spread = max(x2 - x1, y2 - y1), SIGN_DIAMETERS.get(road or "", DEFAULT_SIGN_DIAMETER), \
-        DISTANCE_DIAMETER_SPREAD
+      side = x2 - x1 if sign["class"].partition(":")[0] == MAXIMUM_SPEED_HOURS else max(x2 - x1, y2 - y1)
+      size, spread = SIGN_DIAMETERS.get(road or "", DEFAULT_SIGN_DIAMETER), DISTANCE_DIAMETER_SPREAD
     return size / max(side, 1e-6), side, size, spread, sign["class"]
 
   def _fitted(self, diameter: float, spread: float) -> float:

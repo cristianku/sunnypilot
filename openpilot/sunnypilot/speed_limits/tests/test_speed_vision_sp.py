@@ -85,6 +85,13 @@ def test_the_memory_fills_the_fields(custom):
   assert logged(custom, memory) == ("limit", "sign", "maximum_speed:80", 80, 0.95, True)
 
 
+def test_a_number_with_hours_is_its_number_to_the_memory(custom):
+  memory = vision.SpeedLimitMemory("DE")
+  assert memory.update_frame(0.0, [read("maximum_speed:30", 0.9)]) == 0
+  assert memory.update_frame(0.2, [read("maximum_speed_hours:30", 0.95)]) == pytest.approx(30 / 3.6)  # the plate read when near
+  assert logged(custom, memory) == ("limit", "sign", "maximum_speed_hours:30", 30, 0.95, True)
+
+
 def test_the_comment_lists_the_vocabulary():
   text = (CEREAL / "custom.capnp").read_text()
   struct = text[text.index("struct SpeedVisionSP"):]

@@ -75,6 +75,22 @@ sends nothing, so the resolver falls to the map. Without a `brain` the old limit
 
 The brain always says a number, so with "Map Data + Vision" the map is not used while it runs.
 
+## A number with hours
+
+A limit valid at some hours (a German 30 with a "22-6" plate below it) is a class of its own, `maximum_speed_hours:30`: one
+box around the disc and the plate, read by the classifier like any other sign. `class_speed` gives its number, so
+`SpeedLimitMemory`, `SignDistance` and `LimitAhead` treat it as a 30 at every hour. No code turns the hours into a limit: only
+the brain can tell them apart, from the plate and the local hour.
+
+`vision.class_plate` gives the plate, "time" for this class. It reaches the brain only when the contract's `step` says
+`"plates": true`: a brain without that key was trained with the plate unknown on every frame, so it gets the signs as before.
+
+The class says that hours exist, not which hours. The classifier sees only SignNet's box, so a SignNet that did not learn the
+tall box cuts the disc alone and reads a plain 30; a plate far away is unreadable, so the sign reads as a plain number until
+near. `SignDistance` measures this class by the box's width, the disc's side, since its height holds the plate too; that a
+plate is no wider than its disc is assumed, not measured. A plain 30 on the same tall box is still measured by its height, so
+it looks nearer than it is; when the class changes the sightings start again, as for another sign.
+
 ## Full resolution switches
 
 Two Developer switches, both off by default and applied from the next drive. With them off nothing changes.

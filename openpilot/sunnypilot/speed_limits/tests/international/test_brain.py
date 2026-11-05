@@ -80,6 +80,45 @@ def test_a_sign_read_reaches_the_network(reader):
   assert reader.network.calls[0][1][0, 0] == pytest.approx(80 / brain_inputs.SIGN_KPH_SCALE)
 
 
+def read_hours(reader):
+  for at in (0.0, 0.2, 0.4, 0.6):
+    reader.add_signs(at, [{'class': 'maximum_speed_hours:30', 'confidence': 0.99}])
+
+
+def unknown_plate():
+  return np.eye(brain_inputs.INPUT_SIZES['plate'], dtype=np.float32)[-1]
+
+
+def test_a_brain_trained_without_plates_gets_no_plate(reader, monkeypatch):
+  seen = []
+  monkeypatch.setattr(reader.signs, 'add', lambda now, signs: seen.append(signs))
+  reader.add_signs(0.0, [{'class': 'maximum_speed_hours:30', 'confidence': 0.99}])
+  assert seen == [[('maximum_speed_hours:30', 0.99)]]
+
+
+def test_without_plates_a_number_with_hours_is_its_number(reader):
+  read_hours(reader)
+  assert reader.signs.number == 30
+  assert np.array_equal(reader.signs.plate_row(), unknown_plate())
+
+
+def test_a_brain_trained_with_plates_gets_the_plate(vision):
+  reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'plates': True}), vision, 64, 32)
+  read_hours(reader)
+  assert reader.signs.number == 30
+  reader.step(1.0, *frame(), None, None, None)
+  at = brain_inputs.INPUT_SIZES['signs']
+  plate = reader.network.calls[0][1][0, at:at + brain_inputs.INPUT_SIZES['plate']]
+  assert plate[brain_inputs.PLATES.index('time')] == 1.0 and plate.sum() == 1.0
+
+
+def test_a_brain_trained_with_plates_gets_none_from_a_plain_number(vision):
+  reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'plates': True}), vision, 64, 32)
+  for at in (0.0, 0.2, 0.4, 0.6):
+    reader.add_signs(at, [{'class': 'maximum_speed:30', 'confidence': 0.99}])
+  assert np.array_equal(reader.signs.plate_row(), unknown_plate())
+
+
 def test_the_memory_goes_on_and_starts_again_after_a_gap(reader):
   reader.step(0.0, *frame(), None, None, None)
   reader.step(1.0, *frame(), None, None, None)
