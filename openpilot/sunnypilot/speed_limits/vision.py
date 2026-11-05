@@ -546,10 +546,16 @@ def crop_rectangle(box: list[float], width: int, height: int) -> tuple[int, int,
   return left, top, right, bottom
 
 
-def classifier_input(y: np.ndarray, uv: np.ndarray, box: list[float]) -> np.ndarray:
+def classifier_input(y: np.ndarray, uv: np.ndarray, box: list[float],
+                     full: tuple[np.ndarray, np.ndarray] | None = None) -> np.ndarray:
   """The classifier's input for a box: the box cut from the full frame, resized to CLASSIFIER_SIZE and normalised,
-  float (1, 3, CLASSIFIER_SIZE, CLASSIFIER_SIZE)."""
+  float (1, 3, CLASSIFIER_SIZE, CLASSIFIER_SIZE). full: the planes of the same frame at a higher definition, a whole
+  multiple of y's: the same window of the scene, cut from their pixels."""
   left, top, right, bottom = crop_rectangle(box, y.shape[1], y.shape[0])
+  if full is not None:
+    scale = full[0].shape[1] // y.shape[1]
+    left, top, right, bottom = left * scale, top * scale, right * scale, bottom * scale
+    y, uv = full
   crop = resize(yuv_to_rgb(y, uv, top, bottom, left, right), CLASSIFIER_SIZE, CLASSIFIER_SIZE)
   pixels = crop.astype(np.float32) / 255.0
   return ((pixels - CLASSIFIER_MEAN) / CLASSIFIER_STD)[None]
@@ -590,13 +596,14 @@ def class_speed(name: str) -> float | None:
 
 
 def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finder, classifier,
-               classes: list[str]) -> list[dict]:
+               classes: list[str], full: tuple[np.ndarray, np.ndarray] | None = None) -> list[dict]:
   """The signs of a frame: SignNet's boxes, each read by the classifier (its class, how sure, and the speed it gives
   when it is sure enough: written number, 0 for the end of a limit, None for no speed). finder and classifier take the
-  networks' inputs and give their outputs as numpy arrays."""
+  networks' inputs and give their outputs as numpy arrays. full: the frame's planes at a higher definition, where the
+  classifier's crops come from (classifier_input); SignNet stays on y and uv."""
   signs = signnet_boxes(finder(signnet_input(y, uv)), signnet_input.scale)
   for sign in signs:
-    probabilities = softmax(classifier(classifier_input(y, uv, sign["box"])).reshape(-1))
+    probabilities = softmax(classifier(classifier_input(y, uv, sign["box"], full)).reshape(-1))
     index = int(np.argmax(probabilities))
     sign["class"], sign["confidence"] = classes[index], float(probabilities[index])
     sign["speed"] = class_speed(classes[index]) if sign["confidence"] >= MIN_CONFIDENCE else None

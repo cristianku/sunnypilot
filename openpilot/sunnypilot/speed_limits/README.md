@@ -59,6 +59,20 @@ For Vision Only and Map Data + Vision, a missing current allowed solution clears
 the resolver's previous limit as well: the planner also checks the previous-limit
 validity flag. Mixed mode can use a current map fallback; Vision Only cannot.
 
+## Full resolution switches
+
+Two Developer switches, both off by default and applied from the next drive. With them off nothing changes.
+
+- **Record Road at Full Resolution** (`RecordRoadFullResolution`): `encoderd` writes `fcamera.hevc` from the 2688x1520
+  stream, `qcamera` stays on the 1344x760 one. Same file, same index, 10 Mbit/s and a keyframe every 30 frames, so about
+  twice the disk.
+- **Read Signs at Full Resolution** (`ReadSignsFullResolution`): SignNet stays on the 1344x760 frame; the classifier's
+  crop is the same window multiplied by 2, cut in memory from the frame with the same `frame_id`
+  (`vision.classifier_input`). A frame the full stream does not have is read from the low one.
+
+Both need `VISION_STREAM_NARROW_ROAD_FULL` from `camerad`. Without that stream `encoderd` records as usual and
+`speedvisiond` reads the low frames.
+
 ## Tests in this checkout
 
 From the repository root, with the project's Python 3.12 test environment:

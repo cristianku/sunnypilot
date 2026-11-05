@@ -22,6 +22,8 @@ While a round sign (a number, the end of a limit) or a motorway or expressway si
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for
 the driver to check. A limit read on such a sign starts at the sign, as the map's: until the car gets there it is the
 limit ahead, with its distance (speedLimitAhead, speedLimitAheadDistance, vision.LimitAhead).
+With the Developer switch Read Signs at Full Resolution the classifier's crops come from the full stream of camerad, the
+same frame before the scaling; SignNet, the road-type network and the distance stay on the low frame.
 """
 import os
 os.environ['GMMU'] = '0'
@@ -40,7 +42,31 @@ from openpilot.sunnypilot.speed_limits import runner, vision
 from openpilot.sunnypilot.speed_limits.country import CountryResolver, OfflineBorders, GpsFix
 
 PERIOD = 0.2  # seconds between the frames read
+FULL_FRAME_WAIT = 10  # ms for the full stream's frame, already sent when the low one comes
 NICENESS = 10  # the frame's preparation takes 100 ms on a little core: the driving processes come first
+
+
+def full_stream(params: Params) -> VisionIpcClient | None:
+  """The road camera before the scaling when the Developer switch asks for it and camerad has it, else None."""
+  if not params.get_bool("ReadSignsFullResolution"):
+    return None
+  if VisionStreamType.VISION_STREAM_NARROW_ROAD_FULL not in VisionIpcClient.available_streams("camerad", False):
+    cloudlog.warning("speedvisiond: no full road stream, the signs from the low frames")
+    return None
+  client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_NARROW_ROAD_FULL, True)
+  while not client.connect(False):
+    time.sleep(0.1)
+  cloudlog.warning(f"speedvisiond: the signs from the full road stream, {client.width} x {client.height}")
+  return client
+
+
+def full_planes(client: VisionIpcClient | None, frame_id: int) -> tuple[np.ndarray, np.ndarray] | None:
+  """The planes of the full stream's frame frame_id, None when it has no such frame right now: camerad sends it just
+  before the low one, so it is there, unless a newer one came in the meantime and the low frame serves this time."""
+  buf = client.recv(FULL_FRAME_WAIT) if client is not None else None
+  if buf is None or client.frame_id != frame_id:
+    return None
+  return vision.nv12_planes(np.frombuffer(buf.data, dtype=np.uint8), buf.width, buf.height, buf.stride, buf.uv_offset)
 
 
 def focal_length(width: int, height: int) -> float:
@@ -86,6 +112,8 @@ def main() -> None:
   while not client.connect(False):
     time.sleep(0.1)
   cloudlog.warning(f"speedvisiond: {files.name} on the road camera, {client.width} x {client.height}")
+
+  full = full_stream(Params())
 
   road_types = None
   if files.road_type is not None:
@@ -142,7 +170,7 @@ def main() -> None:
 
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
-    signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes)
+    signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes, full_planes(full, client.frame_id))
     if road_types is not None and road_types.due(now):
       # Right after SignNet, while the GPU is still free of the driving model.
       road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now),

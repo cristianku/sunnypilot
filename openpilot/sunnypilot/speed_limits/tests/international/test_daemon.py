@@ -21,6 +21,7 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
   class Client:
     width = 16
     height = 16
+    frame_id = 0
 
     def __init__(self, *args):
       pass
@@ -57,6 +58,9 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
   class Params:
     def get(self, key):
       return osm_country if key == 'OsmLocationName' else None
+
+    def get_bool(self, key):
+      return False
 
   files = NS(settings=settings, name='synthetic', finder='finder', classifier='classifier', road_type=None, classes=['maximum_speed:30'])
   signs = [dict(box=[0, 0, 10, 10], confidence=0.99, speed=30.0, **{'class': 'maximum_speed:30'})]
@@ -111,3 +115,42 @@ def test_daemon_keeps_the_last_gps_country_when_the_fix_is_lost(candidate, visio
   out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', gps_fix_until=0.7, signs_from=0.8)
   assert out.speedLimit == pytest.approx(13.4112)
   assert (out.rawSignValue, out.rawSignUnit, out.rawSignCountry) == (30, 'mph', 'GB')
+
+
+def full_stream_functions(candidate, vision, streams, switch):
+  """speedvisiond's full_stream and full_planes with a camerad offering streams and the Developer switch at switch."""
+  class Client:
+    width, height, frame_id = 4, 4, 7
+
+    def __init__(self, *args):
+      pass
+
+    @staticmethod
+    def available_streams(name, block):
+      return streams
+
+    def connect(self, *args):
+      return True
+
+    def recv(self, timeout):
+      return NS(data=bytes(range(24)), width=4, height=4, stride=4, uv_offset=16)
+
+  env = {'os': NS(environ={}), 'Params': object, 'VisionIpcClient': Client, 'VisionStreamType': NS(VISION_STREAM_NARROW_ROAD_FULL=4),
+         'cloudlog': NS(warning=lambda _: None),
+         'time': NS(sleep=lambda _: None), 'np': np, 'vision': vision, 'NoReturn': object, '__name__': 'units_daemon'}
+  execute(candidate / 'openpilot/sunnypilot/speed_limits/speedvisiond.py', env)
+  return env['full_stream'](NS(get_bool=lambda key: switch and key == 'ReadSignsFullResolution')), env['full_planes']
+
+
+def test_full_stream_only_with_the_switch_and_the_stream(candidate, vision):
+  assert full_stream_functions(candidate, vision, {0, 4}, False)[0] is None
+  assert full_stream_functions(candidate, vision, {0}, True)[0] is None
+  assert full_stream_functions(candidate, vision, {0, 4}, True)[0] is not None
+
+
+def test_full_planes_of_the_same_frame_only(candidate, vision):
+  client, full_planes = full_stream_functions(candidate, vision, {0, 4}, True)
+  y, uv = full_planes(client, 7)
+  assert y.shape == (4, 4) and uv.shape == (2, 4)
+  assert full_planes(client, 6) is None
+  assert full_planes(None, 7) is None

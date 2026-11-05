@@ -112,6 +112,34 @@ def test_classifier_input():
   assert np.allclose(x[0, :, 80, 80], expected, atol=1e-6)
 
 
+def test_classifier_input_from_a_higher_definition():
+  # The low frame's pixels doubled give the crop of the low frame, a detail only the high one has changes it
+  low = np.zeros((40, 60), dtype=np.uint8)
+  low[10:20, 20:30] = 200
+  high = np.repeat(np.repeat(low, 2, axis=0), 2, axis=1)
+  chroma = np.full((20, 30), 128, dtype=np.uint8)
+  y, uv = nv12(low, chroma, chroma)
+  high_chroma = np.full((40, 60), 128, dtype=np.uint8)
+  box = [20, 10, 30, 20]
+  expected = vision.classifier_input(y, uv, box)
+  assert np.allclose(vision.classifier_input(y, uv, box, nv12(high, high_chroma, high_chroma)), expected, atol=1e-5)
+
+  high[25:35, 45:55] = 0
+  assert not np.allclose(vision.classifier_input(y, uv, box, nv12(high, high_chroma, high_chroma)), expected, atol=1e-5)
+
+
+def test_classifier_input_cuts_the_same_window_of_the_scene():
+  # A window at the frame's border stays the low frame's window: it is multiplied, never worked out again on the high one
+  y, uv = nv12(np.full((20, 30), 128), np.full((10, 15), 128), np.full((10, 15), 128))
+  high = np.zeros((40, 60), dtype=np.uint8)
+  left, top, right, bottom = vision.crop_rectangle([29.6, 19.9, 40, 30], 30, 20)
+  high[top * 2:bottom * 2, left * 2:right * 2] = 255
+  chroma = np.full((20, 30), 128, dtype=np.uint8)
+  x = vision.classifier_input(y, uv, [29.6, 19.9, 40, 30], nv12(high, chroma, chroma))
+  white = vision.classifier_input(*nv12(np.full((20, 30), 255), np.full((10, 15), 128), np.full((10, 15), 128)), [0, 0, 10, 10])
+  assert np.allclose(x, white, atol=1e-5)
+
+
 @pytest.mark.parametrize("name, speed", [("maximum_speed:80", 80), ("variable_display:100", 100), ("zone:30", 30),
                                          ("road_marking:30", 30), ("cancellation", 0), ("maximum_speed:unknown", None),
                                          ("zone:unknown", None), ("other_sign:give_way", None), ("not_a_sign", None),
@@ -129,6 +157,20 @@ def test_read_signs():
   y, uv = nv12(np.full((760, 1344), 128), np.full((380, 672), 128), np.full((380, 672), 128))
   signs = vision.read_signs(y, uv, vision.SignNetInput(1344, 760), lambda x: output, lambda x: next(answers), classes)
   assert [(sign["class"], sign["speed"]) for sign in signs] == [("maximum_speed:50", 50), ("maximum_speed:80", None)]
+
+  # With the planes of a higher definition SignNet stays on y and uv and the crops come from them
+  answers = iter([np.array([[5.0, 0.0, 0.0]]), np.array([[0.0, 0.5, 0.0]])])
+  crops = []
+
+  def classifier(x):
+    crops.append(x)
+    return next(answers)
+
+  full = nv12(np.full((1520, 2688), 255), np.full((760, 1344), 128), np.full((760, 1344), 128))
+  signs = vision.read_signs(y, uv, vision.SignNetInput(1344, 760), lambda x: output, classifier, classes, full)
+  assert [sign["box"] for sign in signs] == [sign["box"] for sign in vision.read_signs(
+    y, uv, vision.SignNetInput(1344, 760), lambda x: output, lambda x: np.array([[5.0, 0.0, 0.0]]), classes)]
+  assert all(crop.max() > 1.5 for crop in crops)  # white, where the low frame is grey
 
 
 def test_memory_confirms_and_holds():
