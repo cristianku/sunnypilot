@@ -34,16 +34,19 @@ fusion stays in the speed-limit resolver.
 There are no approved policy defaults. All five values must be supplied explicitly
 through the release's `settings.country_policy`: `gps_max_age_s`,
 `gps_max_accuracy_m`, `border_margin_m`, `confirm_s`, `max_sample_gap_s`.
-The lookup expects `country-borders.json.gz` beside `country.py`, with `countries`
-containing ISO codes, bounding boxes and polygon rings. **No border asset or GPS
-policy was added to this runtime checkout.** The coarse research asset tested
-offline missed observed crossings; the finer comparison asset has separate
-licensing restrictions. Neither is promoted by integrating the code.
+The lookup reads `country-borders.json.gz` beside `country.py`, with `countries`
+containing ISO codes, bounding boxes and polygon rings. It is the coarse Natural Earth
+asset the server labels the brain's country with, so the car gives the brain the country
+of its training. Tested offline it missed observed crossings: near a border the country
+can stay the old one for a while. A release carries a policy only with a brain, and its
+values are a first try, not validated on the road; there the country is an input of the
+network and picks the unit of the raw reading in the logs, nothing else. Without a brain
+no policy is published, so the borders are not used and a unit never comes from them.
 
 Until GPS confirms a country, `speedvisiond` uses the country chosen in
 Settings › OSM (`OsmLocationName`, an ISO code), or CH when none is chosen, as
 before the GPS lookup existed. This is the case without a policy or usable
-borders, which is every release today. Once GPS has confirmed a country, invalid
+borders, which is every release without a brain. Once GPS has confirmed a country, invalid
 or stale GPS and ambiguous borders keep that last confirmed country.
 `vision.sign_unit` gives mph in the UK, the US and the places that follow them
 (`MPH_COUNTRIES`), km/h in every other country; only without a country is the
@@ -58,6 +61,19 @@ not device-validated.
 For Vision Only and Map Data + Vision, a missing current allowed solution clears
 the resolver's previous limit as well: the planner also checks the previous-limit
 validity flag. Mixed mode can use a current map fallback; Vision Only cannot.
+
+## The brain
+
+When the release has a `brain` (`speed_limits.json`, `brain.onnx`), it is the vision limit: "Map Data + Vision" stays the one
+choice in sunnylink and the resolver does not change. `brain.BrainReader` steps once a second with the frame, what `brain_inputs.py`
+makes of the signs read, the car ahead (`radarState`), the local hour and the country from GPS. The speed it says is
+`speedLimit`, with `speedLimitReason` "brain". The rules of `SpeedLimitMemory`, the road-type network and `LimitAhead` do not run
+then; SignNet, the classifier and the distance to a sign do.
+
+The contract holds the sha256 of the `brain_inputs.py` it was trained with: the car refuses another one, and speedvisiond then
+sends nothing, so the resolver falls to the map. Without a `brain` the old limit runs as before.
+
+The brain always says a number, so with "Map Data + Vision" the map is not used while it runs.
 
 ## Full resolution switches
 

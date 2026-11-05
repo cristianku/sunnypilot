@@ -40,8 +40,9 @@ STALE_PARTIAL_SECONDS = 3600
 
 class Networks:
   """The files of the networks: SignNet (finder), the classifier and its classes, the name of the release; the road
-  type network and its classes when the release has one (road_type, optional in format 2); the settings of the vision
-  limit (settings, optional: vision.apply_settings)."""
+  type network and its classes when the release has one (road_type, optional in format 2); the brain and its contract
+  when the release has one (brain, optional in format 2: it is the limit then); the settings of the vision limit (settings,
+  optional: vision.apply_settings)."""
   def __init__(self, manifest: dict):
     self.name = f"speed-limits {manifest['version']}"
     self.settings: dict = manifest.get("settings") if isinstance(manifest.get("settings"), dict) else {}
@@ -54,10 +55,15 @@ class Networks:
     if "road_type" in manifest:
       self.road_type = MODELS_DIR / manifest["road_type"]["file"]
       self.road_types = json.loads((MODELS_DIR / manifest["road_type"]["contract"]).read_text())["output"]["classes"]
+    self.brain: Path | None = None
+    self.brain_contract: dict = {}
+    if "brain" in manifest:
+      self.brain = MODELS_DIR / manifest["brain"]["file"]
+      self.brain_contract = json.loads((MODELS_DIR / manifest["brain"]["contract"]).read_text())
 
   def onnx(self) -> list[Path]:
-    """Every network of the release, the road type's too."""
-    return [self.finder, self.classifier] + ([self.road_type] if self.road_type else [])
+    """Every network of the release, the road type's and the brain's too."""
+    return [self.finder, self.classifier] + [path for path in (self.road_type, self.brain) if path]
 
 
 def networks() -> Networks | None:
@@ -127,7 +133,7 @@ class Network:
 
 class StepNetwork:
   """A compiled network with several named inputs and outputs (the road type: the frame, the car's speed and motion,
-  its memory): numpy in by name, numpy (float32) out by name."""
+  its memory; the brain: the frame, what it is given beside it, its memory): numpy in by name, numpy (float32) out by name."""
   def __init__(self, path: Path):
     from tinygrad.tensor import Tensor
     from openpilot.selfdrive.modeld.helpers import load_oob

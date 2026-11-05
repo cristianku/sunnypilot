@@ -765,15 +765,18 @@ class SpeedLimitMemory:
     normalized = [speed for value in readings if (speed := sign_mps(value, sign_unit(self.country))) is not None]
     limit = self._update(now, normalized, signs, road_type, v_ego)
     if raw is not None:
-      speed = class_speed(raw["class"])
-      unit = sign_unit(self.country)
-      physical = sign_mps(speed, unit) if speed is not None else None
-      value = ROAD_SIGNS.get(raw["class"]) if speed is None else physical
-      self.raw_class, self.raw_confidence = raw["class"], float(raw["confidence"])
-      self.raw_value, self.raw_unit, self.raw_country = speed or 0.0, unit, self.country or ""
-      self.raw_speed = (speed or 0.0) if unit == "km/h" else physical * 3.6 if physical is not None else 0.0
-      self.raw_taken = self._taken is not None and self._taken == value
+      self.raw_taken = self._taken == self.note_raw(raw) and self._taken is not None
     return limit
+
+  def note_raw(self, raw: dict) -> float | str | None:
+    """A frame's raw reading (raw_reading) kept for the logs; what the limit would be set from if it were taken."""
+    speed = class_speed(raw["class"])
+    unit = sign_unit(self.country)
+    physical = sign_mps(speed, unit) if speed is not None else None
+    self.raw_class, self.raw_confidence = raw["class"], float(raw["confidence"])
+    self.raw_value, self.raw_unit, self.raw_country = speed or 0.0, unit, self.country or ""
+    self.raw_speed = (speed or 0.0) if unit == "km/h" else physical * 3.6 if physical is not None else 0.0
+    return ROAD_SIGNS.get(raw["class"]) if speed is None else physical
 
   def update_frame(self, now: float, signs: list[dict], road_type: str | None = None,
                    v_ego: float | None = None) -> float:

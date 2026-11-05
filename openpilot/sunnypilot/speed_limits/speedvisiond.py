@@ -22,6 +22,9 @@ While a round sign (a number, the end of a limit) or a motorway or expressway si
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for
 the driver to check. A limit read on such a sign starts at the sign, as the map's: until the car gets there it is the
 limit ahead, with its distance (speedLimitAhead, speedLimitAheadDistance, vision.LimitAhead).
+A release with a brain (brain.BrainReader) is another vision limit: what was read, the car ahead, the hour and the country go
+into that network once a second, the speed it says is speedLimit, and neither the rules of the memory, nor the road-type
+network, nor the limit ahead are run. The distance to a sign stays on the screen; signRead pulses on a number confirmed.
 With the Developer switch Read Signs at Full Resolution the classifier's crops come from the full stream of camerad, the
 same frame before the scaling; SignNet, the road-type network and the distance stay on the low frame.
 """
@@ -38,7 +41,7 @@ from openpilot.common.params import Params
 from openpilot.common.gps import get_gps_location_service
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
-from openpilot.sunnypilot.speed_limits import runner, vision
+from openpilot.sunnypilot.speed_limits import brain, runner, vision
 from openpilot.sunnypilot.speed_limits.country import CountryResolver, OfflineBorders, GpsFix
 
 PERIOD = 0.2  # seconds between the frames read
@@ -107,6 +110,7 @@ def main() -> None:
 
   # The car's own signals for the road-type network, every message (carState 100 Hz, deviceMotion 20 Hz).
   car = {name: messaging.sub_sock(name, conflate=False) for name in ("carState", "deviceMotion")}
+  radar = messaging.sub_sock("radarState", conflate=True)
 
   client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_NARROW_ROAD, True)
   while not client.connect(False):
@@ -115,8 +119,17 @@ def main() -> None:
 
   full = full_stream(Params())
 
+  reader = None
+  if files.brain is not None:
+    try:
+      reader = brain.BrainReader(runner.StepNetwork(runner.compile_network(files.brain)), files.brain_contract, vision,
+                                 client.width, client.height)
+    except Exception:
+      cloudlog.exception("speedvisiond: the brain did not compile or load")
+      idle("no brain")
+
   road_types = None
-  if files.road_type is not None:
+  if files.road_type is not None and reader is None:
     try:
       road_types = vision.RoadTypeReader(runner.StepNetwork(runner.compile_network(files.road_type)), files.road_types,
                                          client.width, client.height)
@@ -142,6 +155,8 @@ def main() -> None:
   distance = vision.SignDistance(focal_length(client.width, client.height))
   limit_ahead = vision.LimitAhead()
   v_ego: float | None = None
+  lead: tuple[float, float] | None = None  # metres and km/h of the car ahead
+  gps_clock: tuple[float, float] | None = None  # the GPS clock of the last fix (s) and when it came
   next_frame = 0.0
   while True:
     buf = client.recv()
@@ -156,6 +171,9 @@ def main() -> None:
     for event in messaging.drain_sock(car["deviceMotion"]):
       yaw = event.deviceMotion.angularVelocityDevice
       motion.add_device_motion(now, yaw.z, yaw.valid)
+    for event in messaging.drain_sock(radar):
+      one = event.radarState.leadOne
+      lead = (one.dRel, one.vLead * 3.6) if one.present else None
     if now < next_frame:
       continue
     next_frame = now + PERIOD
@@ -165,29 +183,46 @@ def main() -> None:
       g = getattr(event, gps_service)
       fix = GpsFix(event.logMonoTime * 1e-9, g.latitude, g.longitude, g.horizontalAccuracy,
                    bool(event.valid and g.hasFix))
+      if fix.valid and g.unixTimestampMillis:
+        gps_clock = g.unixTimestampMillis / 1000, now
     gps_country = (country.update(now, fix) if country is not None else None) or gps_country
     memory.set_country(gps_country or settings_country)
 
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes, full_planes(full, client.frame_id))
-    if road_types is not None and road_types.due(now):
-      # Right after SignNet, while the GPU is still free of the driving model.
-      road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now),
-                       memory.board_age(now))
-    road_type = road_types.road_type if road_types is not None else None
-    speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
-    sign_distance = distance.update(now, signs, memory.road)
-    speed_limit = limit_ahead.update(speed_limit, memory.limit_reason, sign_distance, distance.sign_class, distance.odometer)
-
     msg = messaging.new_message("speedVisionSP", valid=True)
-    msg.speedVisionSP.speedLimit = float(speed_limit)
-    msg.speedVisionSP.speedLimitAhead = float(limit_ahead.ahead)
-    msg.speedVisionSP.speedLimitAheadDistance = float(limit_ahead.distance)
+    if reader is not None:
+      reader.add_signs(now, signs)
+      if reader.due(now):
+        # Right after SignNet, while the GPU is still free of the driving model.
+        unix = gps_clock[0] + now - gps_clock[1] if gps_clock is not None else None
+        reader.step(now, y, uv, lead, unix, gps_country)
+      raw = vision.raw_reading(signs)
+      if raw is not None:
+        memory.note_raw(raw)
+      sign_distance = distance.update(now, signs, None)
+      msg.speedVisionSP.speedLimit = float(reader.speed_limit)
+      msg.speedVisionSP.signRead = reader.signs.read_at == now
+      memory.fill_log(msg.speedVisionSP)  # for the logs: the last sign read
+      msg.speedVisionSP.speedLimitState = "limit" if reader.speed_limit > 0 else "unknown"
+      msg.speedVisionSP.speedLimitReason = "brain"
+    else:
+      if road_types is not None and road_types.due(now):
+        # Right after SignNet, while the GPU is still free of the driving model.
+        road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now),
+                         memory.board_age(now))
+      road_type = road_types.road_type if road_types is not None else None
+      speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
+      sign_distance = distance.update(now, signs, memory.road)
+      speed_limit = limit_ahead.update(speed_limit, memory.limit_reason, sign_distance, distance.sign_class, distance.odometer)
+      msg.speedVisionSP.speedLimit = float(speed_limit)
+      msg.speedVisionSP.speedLimitAhead = float(limit_ahead.ahead)
+      msg.speedVisionSP.speedLimitAheadDistance = float(limit_ahead.distance)
+      msg.speedVisionSP.signRead = memory.sign_read
+      msg.speedVisionSP.roadType = road_type or ""
+      memory.fill_log(msg.speedVisionSP)  # for the logs: why the limit is what it is, the last sign read taken or not
     msg.speedVisionSP.modelName = files.name
-    msg.speedVisionSP.signRead = memory.sign_read
-    msg.speedVisionSP.roadType = road_type or ""
-    memory.fill_log(msg.speedVisionSP)  # for the logs: why the limit is what it is, the last sign read taken or not
     msg.speedVisionSP.signDistance = sign_distance
     msg.speedVisionSP.signSize = distance.side
     pm.send("speedVisionSP", msg)

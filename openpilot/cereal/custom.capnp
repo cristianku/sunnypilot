@@ -505,7 +505,8 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   # off the carriageways ended on one), "car_park" (a car park seen: the release's garage limit, or its car park limit
   # in the open when the road-type network tells a garage from it), "road_type" (the general limit of the road type
   # seen where no sign gives one), "country_change" (jurisdiction changed), "zone30" (a 30 zone seen lowers an implicit
-  # town limit, never an explicit number equal to that limit); "" before the first.
+  # town limit, never an explicit number equal to that limit), "brain" (the network with memory said it: no rule runs);
+  # "" before the first.
   speedLimitReason @5 :Text;
   # The last sign read that the memory can take, the best of its frame at any confidence, kept until another: its class
   # ("maximum_speed:80", "cancellation" the end of a limit, "other_sign:motorway_start" a road sign...), "" before the

@@ -10,7 +10,8 @@ from test_chain import execute
 POLICY = {'gps_max_age_s': 2, 'gps_max_accuracy_m': 20, 'border_margin_m': 100, 'confirm_s': 0.1, 'max_sample_gap_s': 1}
 
 
-def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=float('inf'), signs_from=0.0):
+def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=float('inf'), signs_from=0.0, reader=None,
+               brain_contract=None, sleep=lambda _: None):
   """The messages speedvisiond sends until 1.3 s: GPS in GB (with a fix until gps_fix_until), a 30 sign from signs_from."""
   class Stop(Exception):
     pass
@@ -37,8 +38,10 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
 
   def drain(sock):
     if sock == 'gpsLocationExternal':
-      g = NS(latitude=0, longitude=0.5, horizontalAccuracy=5, hasFix=clock.now < gps_fix_until)
+      g = NS(latitude=0, longitude=0.5, horizontalAccuracy=5, hasFix=clock.now < gps_fix_until, unixTimestampMillis=1_770_000_000_000)
       return [NS(logMonoTime=int((clock.now - 0.01) * 1e9), valid=True, gpsLocationExternal=g)]
+    if sock == 'radarState':
+      return [NS(radarState=NS(leadOne=NS(present=True, dRel=30.0, vLead=10.0)))]
     return []
 
   class Pub:
@@ -62,7 +65,8 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
     def get_bool(self, key):
       return False
 
-  files = NS(settings=settings, name='synthetic', finder='finder', classifier='classifier', road_type=None, classes=['maximum_speed:30'])
+  files = NS(settings=settings, name='synthetic', finder='finder', classifier='classifier', road_type=None,
+             brain='brain' if reader is not None else None, brain_contract=brain_contract, classes=['maximum_speed:30'])
   signs = [dict(box=[0, 0, 10, 10], confidence=0.99, speed=30.0, **{'class': 'maximum_speed:30'})]
   v = NS(**vars(vision))
   v.SignNetInput = lambda *args: None
@@ -70,7 +74,7 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
   b = country.OfflineBorders([{'code': 'GB', 'bbox': [0, -1, 1, 1], 'polygons': [[[[0, -1], [1, -1], [1, 1], [0, 1], [0, -1]]]]}])
   env = {
     'os': NS(nice=lambda _: None, environ={}),
-    'time': NS(monotonic=lambda: clock.now, sleep=lambda _: None),
+    'time': NS(monotonic=lambda: clock.now, sleep=sleep),
     'np': np,
     'NoReturn': object,
     'VisionIpcClient': Client,
@@ -81,7 +85,8 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
     'cloudlog': NS(warning=lambda _: None, exception=lambda _: None),
     'DEVICE_CAMERAS': {},
     'vision': v,
-    'runner': NS(networks=lambda: files, Network=lambda _: None, compile_network=lambda p: p),
+    'runner': NS(networks=lambda: files, Network=lambda _: None, compile_network=lambda p: p, StepNetwork=lambda p: None),
+    'brain': NS(BrainReader=reader),
     'CountryResolver': country.CountryResolver,
     'OfflineBorders': NS(load=lambda: b),
     'GpsFix': country.GpsFix,
@@ -115,6 +120,53 @@ def test_daemon_keeps_the_last_gps_country_when_the_fix_is_lost(candidate, visio
   out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', gps_fix_until=0.7, signs_from=0.8)
   assert out.speedLimit == pytest.approx(13.4112)
   assert (out.rawSignValue, out.rawSignUnit, out.rawSignCountry) == (30, 'mph', 'GB')
+
+
+class FakeBrain:
+  """A BrainReader saying 77 km/h from its first step, with what the daemon gave it."""
+  def __init__(self, network, contract, vision, width, height):
+    self.speed_limit = 0.0
+    self.seen, self.steps = [], []
+    self.signs = NS(read_at=None)
+    FakeBrain.last = self
+
+  def add_signs(self, now, signs):
+    self.seen.append(signs)
+    self.signs.read_at = now
+
+  def due(self, now):
+    return not self.steps
+
+  def step(self, now, y, uv, lead, unix_seconds, country):
+    self.steps.append((lead, unix_seconds, country))
+    self.speed_limit = 77 / 3.6
+
+
+def test_daemon_with_a_brain_publishes_what_it_says(candidate, vision, country):
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', reader=FakeBrain, brain_contract={})
+  assert out.speedLimit == pytest.approx(77 / 3.6)  # never the 30 sign's mph
+  assert (out.speedLimitState, out.speedLimitReason) == ('limit', 'brain')
+  assert out.signRead
+  assert (out.rawSignValue, out.rawSignUnit) == (30, 'mph')  # the logs keep what was read
+  assert FakeBrain.last.seen[0][0]['class'] == 'maximum_speed:30'
+  lead, unix_seconds, _ = FakeBrain.last.steps[0]
+  assert lead == (30.0, 36.0)
+  assert unix_seconds >= 1_770_000_000
+
+
+def test_daemon_goes_idle_when_the_brain_does_not_load(candidate, vision, country):
+  # No message: the resolver falls to the map, never to the old rules with the network missing
+  class Idle(Exception):
+    pass
+
+  def refuse(*args):
+    raise ValueError('another brain_inputs.py')
+
+  def sleep(_):
+    raise Idle
+
+  with pytest.raises(Idle):
+    run_daemon(candidate, vision, country, {}, 'CH', reader=refuse, brain_contract={}, sleep=sleep)
 
 
 def full_stream_functions(candidate, vision, streams, switch):
