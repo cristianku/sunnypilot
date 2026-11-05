@@ -607,6 +607,17 @@ def class_plate(name: str) -> str | None:
   return "time" if name.partition(":")[0] == MAXIMUM_SPEED_HOURS else None
 
 
+def class_hours(name: str) -> tuple[int, int] | None:
+  """The hours a class says are on its plate, from and to: (22, 6) for maximum_speed_hours:30:22-6; None when it does not
+  say them. No rule reads them: they go to the brain as they are."""
+  kind, _, value = name.partition(":")
+  hours = value.partition(":")[2]
+  if kind != MAXIMUM_SPEED_HOURS or not hours:
+    return None
+  start, _, end = hours.partition("-")
+  return int(start), int(end)
+
+
 def read_signs(y: np.ndarray, uv: np.ndarray, signnet_input: SignNetInput, finder, classifier,
                classes: list[str], full: tuple[np.ndarray, np.ndarray] | None = None) -> list[dict]:
   """The signs of a frame: SignNet's boxes, each read by the classifier (its class, how sure, and the speed it gives

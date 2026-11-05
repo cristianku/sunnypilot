@@ -137,7 +137,7 @@ class FakeBrain:
   def due(self, now):
     return not self.steps
 
-  def step(self, now, y, uv, lead, unix_seconds, country):
+  def step(self, now, y, uv, lead, unix_seconds, country, v_ego):
     self.steps.append((lead, unix_seconds, country))
     self.speed_limit = 77 / 3.6
 

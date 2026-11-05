@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from openpilot.sunnypilot.speed_limits import brain, brain_inputs
 
-GROUPS = ['signs', 'plate', 'hour', 'lead', 'country', 'pedals', 'speed']
+GROUPS = ['signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed']
 SIZE = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS)
 
 
@@ -44,6 +44,13 @@ def test_refuses_a_network_made_with_other_inputs(vision):
     brain.BrainReader(Network(), contract(inputs_sha256='0' * 64), vision, 64, 32)
 
 
+def test_a_brain_of_an_earlier_file_with_the_same_groups_stays(vision):
+  step = {'rate_hz': 1.0, 'groups': ['signs', 'plate', 'hour', 'lead', 'country'], 'memory_gap_seconds': 5.0}
+  reader = brain.BrainReader(Network(), contract(inputs_sha256=brain_inputs.SAME_GROUPS[0], step=step), vision, 64, 32)
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert reader.network.calls[0][1].shape == (1, sum(brain_inputs.INPUT_SIZES[name] for name in step['groups']))
+
+
 def test_refuses_a_network_asking_for_what_the_car_does_not_give(vision):
   wrong = contract(step={'rate_hz': 1.0, 'groups': ['signs', 'map'], 'memory_gap_seconds': 5.0})
   with pytest.raises(ValueError, match='does not give'):
@@ -67,7 +74,7 @@ def test_the_groups_go_in_side_by_side(reader):
   reader.step(1.0, *frame(), (30.0, 36.0), 1_770_000_000.0, 'DE', 15.0)
   _, extra, _ = reader.network.calls[0]
   assert extra.shape == (1, SIZE)
-  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:3])
+  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:4])
   assert np.array_equal(extra[0, at:at + 3], brain_inputs.lead_row(30.0, 36.0))
   at += brain_inputs.INPUT_SIZES['lead']
   assert np.array_equal(extra[0, at:at + brain_inputs.INPUT_SIZES['country']], brain_inputs.country_row('DE'))
@@ -121,6 +128,27 @@ def test_a_brain_trained_with_plates_gets_none_from_a_plain_number(vision):
   assert np.array_equal(reader.signs.plate_row(), unknown_plate())
 
 
+def read_with_hours(reader):
+  for at in (0.0, 0.2, 0.4, 0.6):
+    reader.add_signs(at, [{'class': 'maximum_speed_hours:30:22-6', 'confidence': 0.99}])
+
+
+def test_a_brain_trained_with_hours_gets_them(vision):
+  reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'plates': True, 'hours': True}), vision, 64, 32)
+  read_with_hours(reader)
+  reader.step(1.0, *frame(), None, None, None, None)
+  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:2])
+  hours = reader.network.calls[0][1][0, at:at + brain_inputs.INPUT_SIZES['plate_hours']]
+  assert np.allclose(hours[:2], brain_inputs.hour_row(22)[:2]) and np.allclose(hours[2:4], brain_inputs.hour_row(6)[:2])
+  assert hours[4] == 1.0
+
+
+def test_a_brain_trained_with_plates_and_no_hours_gets_the_plate_alone(vision):
+  reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'plates': True}), vision, 64, 32)
+  read_with_hours(reader)
+  assert reader.signs.plate == 'time' and not reader.signs.plate_hours_row().any()
+
+
 def test_the_memory_goes_on_and_starts_again_after_a_gap(reader):
   reader.step(0.0, *frame(), None, None, None, None)
   reader.step(1.0, *frame(), None, None, None, None)
@@ -134,7 +162,7 @@ def test_it_gets_the_pedals_of_the_last_second_and_the_car_speed(reader):
   reader.add_pedals(9.6, False, False)
   reader.step(10.0, *frame(), None, None, None, 15.0)
   reader.step(11.0, *frame(), None, None, None, None)
-  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:5])
+  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:6])
   first, second = (call[1][0][at:] for call in reader.network.calls)
   assert list(first) == [1, 0, 1, 0.5, 1]
   assert list(second) == [0, 0, 1, 0, 0]
@@ -142,5 +170,5 @@ def test_it_gets_the_pedals_of_the_last_second_and_the_car_speed(reader):
 
 def test_a_pedal_is_not_known_before_the_first_car_state(reader):
   reader.step(1.0, *frame(), None, None, None, None)
-  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:5])
+  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:6])
   assert list(reader.network.calls[0][1][0][at:at + 3]) == [0, 0, 0]

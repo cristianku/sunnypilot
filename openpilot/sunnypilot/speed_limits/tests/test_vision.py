@@ -157,6 +157,12 @@ def test_class_plate(name, plate):
   assert vision.class_plate(name) == plate
 
 
+@pytest.mark.parametrize("name, hours", [("maximum_speed_hours:30:22-6", (22, 6)), ("maximum_speed_hours:30:7-17", (7, 17)),
+                                         ("maximum_speed_hours:30", None), ("maximum_speed:30", None), ("cancellation", None)])
+def test_class_hours(name, hours):
+  assert vision.class_hours(name) == hours
+
+
 def test_read_signs():
   output = np.zeros((1, 5, 36, 112), dtype=np.float32)
   output[0, 0, 10, 20], output[0, 0, 20, 50] = 0.9, 0.8

@@ -24,7 +24,7 @@ class BrainReader:
   bit for bit the frames of the training. speed_limit is the speed said (m/s), held between the steps, 0 before the first.
   Raises ValueError on a network that was trained with another brain_inputs.py or asks for what the car does not give."""
   def __init__(self, network, contract: dict, vision, width: int, height: int):
-    if contract["inputs_sha256"] != hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest():
+    if contract["inputs_sha256"] not in (hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest(), *brain_inputs.SAME_GROUPS):
       raise ValueError("the brain was trained with another brain_inputs.py")
     self.groups = tuple(contract["step"]["groups"])
     if not set(self.groups) <= set(brain_inputs.INPUT_SIZES):
@@ -36,18 +36,21 @@ class BrainReader:
     self.image = vision.RoadTypeInput(width, height)
     self.signs = brain_inputs.SignInputs(vision)
     self.class_plate = vision.class_plate if contract["step"].get("plates", False) else None
+    self.class_hours = vision.class_hours if contract["step"].get("hours", False) else lambda name: None
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
     self.last_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
-    """A frame's signs as vision.read_signs gives them. Their plates only to a brain trained with plates (its contract's
-    step): to another one, trained with the plate unknown on every frame, a plate would change the speed at random."""
+    """A frame's signs as vision.read_signs gives them. Their plates only to a brain trained with plates, and their hours
+    only to one trained with hours (its contract's step): to another one, trained with them unknown on every frame, they
+    would change the speed at random."""
     if self.class_plate is None:
       self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
     else:
-      self.signs.add(now, [(sign["class"], sign["confidence"], self.class_plate(sign["class"])) for sign in signs])
+      self.signs.add(now, [(sign["class"], sign["confidence"], self.class_plate(sign["class"]), self.class_hours(sign["class"]))
+                           for sign in signs])
 
   def add_pedals(self, now: float, gas: bool, brake: bool) -> None:
     """Every carState."""
@@ -64,7 +67,7 @@ class BrainReader:
       self.hidden = np.zeros_like(self.hidden)
     self.last_step = now
     metres, kph = lead if lead is not None else (None, None)
-    rows = {"signs": self.signs.features(now), "plate": self.signs.plate_row(),
+    rows = {"signs": self.signs.features(now), "plate": self.signs.plate_row(), "plate_hours": self.signs.plate_hours_row(),
             "hour": brain_inputs.hour_row(brain_inputs.local_hour(unix_seconds, country)),
             "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
             "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego)}
