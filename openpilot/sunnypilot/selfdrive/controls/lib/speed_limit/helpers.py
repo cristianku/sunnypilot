@@ -9,7 +9,7 @@ from openpilot.cereal import custom
 from opendbc.car.structs import car
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode as SpeedLimitMode, Policy
 
 
 def compare_cluster_target(v_cruise_cluster: float, target_set_speed: float, is_metric: bool) -> tuple[bool, bool]:
@@ -41,5 +41,10 @@ def set_speed_limit_assist_availability(CP: car.CarParams, CP_SP: custom.CarPara
   if not allowed:
     if params.get("SpeedLimitMode", return_default=True) == SpeedLimitMode.assist:
       params.put("SpeedLimitMode", int(SpeedLimitMode.warning), block=True)
+
+  # Smartspeed is one choice: it always uses the network, so a source without it does not stay
+  elif params.get("SpeedLimitMode", return_default=True) == SpeedLimitMode.assist and \
+       params.get("SpeedLimitPolicy", return_default=True) not in (Policy.map_data_vision, Policy.vision_only):
+    params.put("SpeedLimitPolicy", int(Policy.map_data_vision), block=True)
 
   return allowed

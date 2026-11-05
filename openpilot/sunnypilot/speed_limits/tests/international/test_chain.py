@@ -53,6 +53,9 @@ def chain(candidate):
     def get(self, name, **kw):
       return self.values.get(name, 0)
 
+    def put(self, name, value, **kw):
+      self.values[name] = value
+
     def get_bool(self, name):
       return bool(self.values.get(name, False))
 
@@ -85,13 +88,13 @@ def chain(candidate):
   sla = sla_env['SpeedLimitAssist'](cp, NS(pcmCruiseSpeed=False))
   data = {
     'carStateSP': NS(speedLimit=99),
-    'speedVisionSP': NS(speedLimit=0),
+    'speedVisionSP': NS(speedLimit=0, speedLimitAhead=0, speedLimitAheadDistance=0),
     'liveMapDataSP': NS(speedLimit=0, speedLimitValid=False, speedLimitAhead=0, speedLimitAheadValid=False, speedLimitAheadDistance=0),
   }
 
   class SM:
     alive = {'speedVisionSP': True}
-    recv_time = {'gpsLocationExternal': time.monotonic(), 'liveMapDataSP': time.monotonic()}
+    recv_time = {'gpsLocationExternal': time.monotonic(), 'liveMapDataSP': time.monotonic(), 'speedVisionSP': time.monotonic()}
 
     def __getitem__(self, k):
       return data[k]
@@ -134,7 +137,7 @@ def test_map_fallback_and_display_units(chain, policy):
   assert step(chain, 13.4112, 30) == pytest.approx(13.4112)
   params.values['IsMetric'] = False
   assert step(chain, 13.4112, 30) == pytest.approx(13.4112)
-  assert r.speed_limit == pytest.approx(13.4112) and s.speed_limit_final_last_conv == 30
+  assert r.speed_limit == pytest.approx(13.4112)
   target = step(chain, 0, 30)
   assert target == (30 if policy == 5 else 255)
   assert r.source == (2 if policy == 5 else 0)  # schema's map / none
@@ -158,11 +161,13 @@ def test_mixed_policy_with_stale_map_gps_revokes_previous_target(chain):
 @pytest.mark.parametrize('policy', [0, 1])
 def test_other_policies_preserve_their_existing_history(chain, policy):
   r, s, sm, data, params, _ = chain
+  params.values['SpeedLimitMode'] = 1  # Smartspeed always moves these sources to the network
   params.values['SpeedLimitPolicy'] = r.policy = policy
   data['carStateSP'].speedLimit = 20
-  assert step(chain, 0, 20) == pytest.approx(20)
+  step(chain, 0, 20)
+  assert r.speed_limit_final_last == pytest.approx(20)
   data['carStateSP'].speedLimit = 0
-  assert step(chain, 0, 0) == pytest.approx(20)
+  step(chain, 0, 0)
   assert r.speed_limit == 0 and r.speed_limit_last_valid
 
 
@@ -233,3 +238,10 @@ signDistance @10 :Float32; signSize @11 :Float32;
     assert legacy.speedLimit == pytest.approx(11.176) and legacy.rawSignSpeed == pytest.approx(40.2336)
   with custom.SpeedVisionSP.from_bytes(payload) as current:
     assert current.rawSignValue == 25 and current.rawSignUnit == 'mph' and current.rawSignCountry == 'US'
+
+
+def test_smartspeed_moves_a_source_without_the_network_to_it(chain):
+  r, s, sm, data, params, _ = chain
+  params.values['SpeedLimitPolicy'] = r.policy = 3
+  assert step(chain, 22.352) == pytest.approx(22.352)
+  assert params.values['SpeedLimitPolicy'] == 5

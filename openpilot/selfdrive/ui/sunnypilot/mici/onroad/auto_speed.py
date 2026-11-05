@@ -6,35 +6,42 @@ See the LICENSE.md file in the root directory for more details.
 """
 import pyray as rl
 
+from opendbc.car.structs import car
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.final_speed_limit import final_box
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE, GAP, ROUNDNESS, SEGMENTS, BORDER, \
-  EYE_WIDTH, EYE_HEIGHT, EYE_TOP, vision_box
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE, GAP, vision_box
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
-FONT_SIZE = 22
+FONT_SIZE = 26
+TEXT = "smartspeed"
 V_CRUISE_UNSET = 255.
+BLINK_TIME = 1.  # secs. The word blinks this long after a + or -, to say they do nothing
+BLINK_RATE = 6  # half blinks a second
 
-GREEN = rl.Color(23, 160, 80, 115)  # see-through (45 %), like the vision square
-GREEN_LIGHT = rl.Color(120, 230, 160, 230)
-DARK_GREY = rl.Color(40, 40, 40, 115)
+ButtonType = car.CarState.ButtonEvent.Type
+CRUISE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.resumeCruise, ButtonType.setCruise)
+
+SHADOW = rl.Color(0, 0, 0, 190)  # the word has no square behind it: this keeps it readable on a bright road
 GREY = rl.Color(145, 155, 149, 255)
 
 
 class AutoSpeed(Widget):
-  """Set Speed Only Engages (Alpha): a green square with an eye and AUTO, on the right of the screen: left of the vision
-  square when that shows, above the torque bar, which runs along the bottom up to the final limit in the corner; else in
-  the corner itself. The car drives to the limit, the set speed only engages, so the set speed is not shown. Always
-  drawn, over an alert too: it is a state that holds for the drive. Green while Speed Limit Assist drives to a limit;
-  dark with a green border while no limit is in force (not engaged, or no limit known)."""
+  """Smartspeed (the mode Assist): the word smartspeed, on the right of the screen: left of the vision
+  square when that shows, above the torque bar, which runs along the bottom up to the corner; else in the corner itself.
+  The car drives to the limit, the set speed only engages, so the set speed is not shown. Always drawn, over an alert
+  too: it is a state that holds for the drive. White while Speed Limit Assist drives to a limit; grey while no limit is
+  in force (not engaged, or no limit known). A + or - on the car does nothing, so the word blinks for a second, only
+  while already engaged: the press that engages does not count."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
-    self._eye: rl.Texture = gui_app.texture("icons_mici/onroad/eye_fill.png", EYE_WIDTH, EYE_HEIGHT)
     self._driving: bool = False
     self._beside_vision: bool = False
+    self._release_toggle: int | None = None
+    self._engaged_since: float | None = None
+    self._blink_until: float = 0.
 
   def set_beside_vision(self, beside: bool) -> None:
     self._beside_vision = beside
@@ -44,24 +51,31 @@ class AutoSpeed(Widget):
     assist = sm['longitudinalPlanSP'].speedLimit.assist
     self._driving = (sm.alive['longitudinalPlanSP'] and ui_state.engaged and assist.enabled and
                      assist.vTarget < V_CRUISE_UNSET)
+    self._update_blink(sm['selfdriveStateSP'].buttonsReleaseToggle, ui_state.engaged, rl.get_time())
+
+  def _update_blink(self, release_toggle: int, engaged: bool, now: float) -> None:
+    released = 0 if self._release_toggle is None else self._release_toggle ^ release_toggle
+    self._release_toggle = release_toggle
+    if not engaged:
+      self._engaged_since = None
+    elif self._engaged_since is None:
+      self._engaged_since = now
+    if self._engaged_since is not None and now - self._engaged_since > BLINK_TIME and \
+       any((released >> b) & 1 for b in CRUISE_BUTTONS):
+      self._blink_until = now + BLINK_TIME
+
+  def _hidden_by_blink(self, now: float) -> bool:
+    return now < self._blink_until and int((self._blink_until - now) * BLINK_RATE) % 2 == 1
 
   def _render(self, rect: rl.Rectangle) -> None:
     if not ui_state.speed_limit_auto_speed or ui_state.sm.recv_frame["carState"] < ui_state.started_frame:
       return
+    if self._hidden_by_blink(rl.get_time()):
+      return
 
-    if self._beside_vision:
-      vision = vision_box(rect)
-      box = rl.Rectangle(vision.x - GAP - SIZE, vision.y, SIZE, SIZE)
-    else:
-      box = final_box(rect)
-    rl.draw_rectangle_rounded(box, ROUNDNESS, SEGMENTS, GREEN if self._driving else DARK_GREY)
-    rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, GREEN_LIGHT if self._driving else GREEN)
-
-    color = rl.WHITE if self._driving else GREY
-    rl.draw_texture_v(self._eye, rl.Vector2(box.x + (SIZE - self._eye.width) / 2, box.y + EYE_TOP), color)
-
-    text = "AUTO"
-    size = measure_text_cached(self._font, text, FONT_SIZE)
-    text_top = box.y + EYE_TOP + self._eye.height
-    text_y = text_top + (box.y + SIZE - text_top - size.y) / 2
-    rl.draw_text_ex(self._font, text, rl.Vector2(box.x + (SIZE - size.x) / 2, text_y), FONT_SIZE, 0, color)
+    size = measure_text_cached(self._font, TEXT, FONT_SIZE)
+    box = vision_box(rect) if self._beside_vision else final_box(rect)
+    right = box.x - GAP if self._beside_vision else box.x + SIZE
+    position = rl.Vector2(right - size.x, box.y + (SIZE - size.y) / 2)
+    rl.draw_text_ex(self._font, TEXT, rl.Vector2(position.x + 2, position.y + 2), FONT_SIZE, 0, SHADOW)
+    rl.draw_text_ex(self._font, TEXT, position, FONT_SIZE, 0, rl.WHITE if self._driving else GREY)

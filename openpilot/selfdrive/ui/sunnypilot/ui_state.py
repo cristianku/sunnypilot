@@ -186,9 +186,8 @@ class UIStateSP:
     self.road_name_toggle = self.params.get_bool("RoadNameToggle")
     self.rocket_fuel = self.params.get_bool("RocketFuel")
     self.speed_limit_mode = self.params.get("SpeedLimitMode", return_default=True)
-    # Set Speed Only Engages (Alpha), only with Assist: the car drives to the limit, the set speed just engages.
-    self.speed_limit_auto_speed = (self.params.get_bool("SpeedLimitSetSpeedEngageOnly") and
-                                   self.speed_limit_mode == Mode.assist)
+    # Smartspeed is the mode Assist: the car drives to the limit, the set speed just engages.
+    self.speed_limit_auto_speed = self.speed_limit_mode == Mode.assist
     # Map Data + Vision and Vision Only use the network's limit, so they show it too: one choice in Speed Limit Source
     # is enough.
     self.speed_limit_vision_display = (self.params.get_bool("SpeedLimitVisionDisplay") or

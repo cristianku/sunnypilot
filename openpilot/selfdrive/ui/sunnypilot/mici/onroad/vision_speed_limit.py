@@ -17,7 +17,7 @@ from openpilot.system.ui.widgets import Widget
 SIZE = 72
 MARGIN = 12
 # Between the squares, and under the road type: at its biggest the vision square's pulse (PULSE_GROW * SIZE / 2, 6.5 px
-# a side, its border 2 px more) only slides under what is drawn after it, the road type, the final limit and AUTO.
+# a side, its border 2 px more) only slides under what is drawn after it, the road type.
 GAP = 8
 ROUNDNESS = 0.3
 SEGMENTS = 10
@@ -48,14 +48,13 @@ GREY = rl.Color(145, 155, 149, 255)
 
 def vision_box(rect: rl.Rectangle) -> rl.Rectangle:
   """On the right, out of the steering wheel's way (the left holds the wheel, the lead car and the distance bars),
-  right above the final limit in the bottom right corner (final_speed_limit.final_box). Above it, not left of it: the
-  torque bar runs along the bottom up to the corner square and grows up to 82 px from the bottom at full torque."""
+  right above the bottom right corner (final_speed_limit.final_box). Above it, not in it: the torque bar runs along the
+  bottom up to the corner and grows up to 82 px from the bottom at full torque, and smartspeed goes left of this square."""
   return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - 2 * SIZE - GAP, SIZE, SIZE)
 
 
 class VisionSpeedLimit(Widget):
-  """The speed limit read by the speed-limits neural network (speedVisionSP), drawn on the right of the screen, right
-  above the final limit (final_speed_limit.py), when Show Vision Speed Limit is on or Speed Limit Source is Map Data +
+  """The speed limit read by the speed-limits neural network (speedVisionSP), drawn on the right of the screen, when Show Vision Speed Limit is on or Speed Limit Source is Map Data +
   Vision or Vision Only: a fuchsia square with an eye and the limit in white, always visible, over an alert too (the
   Dashcam Mode alert stays for the whole drive). The drawing does not change the speed. A dark square with a dash means
   no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read, even one
