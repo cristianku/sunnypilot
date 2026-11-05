@@ -178,7 +178,8 @@ sections:
     - key: SpeedLimitSetSpeedEngageOnly
       widget: toggle
       title: Set Speed Only Engages (Alpha)
-      description: The car drives at the speed limit it knows, also above the set speed. The set speed only engages
+      description: >-
+        The car drives at the speed limit it knows, also above the set speed. The set speed only engages
         and is never the speed: without a limit the car keeps the last limit, or the speed it was engaged at. Curves
         still slow the car down. A green AUTO square shows it on the driving screen, and the set speed is no longer
         shown.
