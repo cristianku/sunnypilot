@@ -590,10 +590,12 @@ def sign_mps(number: float, unit: str) -> float | None:
 
 def class_speed(name: str) -> float | None:
   """The written number a class gives (unit-free): its number for a speed sign (with hours or not), a variable display, a
-  zone or a marking on the road; 0 for the end of a limit; None for the others (other signs, unreadable, not a sign)."""
+  zone or a marking on the road; 0 for the end of a limit; None for the others (other signs, unreadable, not a sign). A
+  number with hours may end with them: maximum_speed_hours:30:22-6 gives 30."""
   if name == CANCELLATION:
     return 0.0
   kind, _, value = name.partition(":")
+  value = value.partition(":")[0]
   if kind in SPEED_KINDS and value.isdigit():
     return float(value)
   return None

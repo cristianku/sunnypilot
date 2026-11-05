@@ -141,6 +141,7 @@ def test_classifier_input_cuts_the_same_window_of_the_scene():
 
 
 @pytest.mark.parametrize("name, speed", [("maximum_speed:80", 80), ("maximum_speed_hours:30", 30),
+                                         ("maximum_speed_hours:30:22-6", 30),
                                          ("variable_display:100", 100), ("zone:30", 30),
                                          ("road_marking:30", 30), ("cancellation", 0), ("maximum_speed:unknown", None),
                                          ("zone:unknown", None), ("other_sign:give_way", None), ("not_a_sign", None),
@@ -149,7 +150,8 @@ def test_class_speed(name, speed):
   assert vision.class_speed(name) == speed
 
 
-@pytest.mark.parametrize("name, plate", [("maximum_speed_hours:30", "time"), ("maximum_speed:30", None), ("zone:30", None),
+@pytest.mark.parametrize("name, plate", [("maximum_speed_hours:30", "time"), ("maximum_speed_hours:30:22-6", "time"),
+                                         ("maximum_speed:30", None), ("zone:30", None),
                                          ("cancellation", None), ("not_a_sign", None)])
 def test_class_plate(name, plate):
   assert vision.class_plate(name) == plate
