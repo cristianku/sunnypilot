@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from openpilot.sunnypilot.speed_limits import brain, brain_inputs
 
-GROUPS = ['signs', 'plate', 'hour', 'lead', 'country']
+GROUPS = ['signs', 'plate', 'hour', 'lead', 'country', 'pedals', 'speed']
 SIZE = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS)
 
 
@@ -52,30 +52,32 @@ def test_refuses_a_network_asking_for_what_the_car_does_not_give(vision):
 
 def test_says_the_class_in_metres_per_second(reader):
   assert reader.speed_limit == 0.0
-  assert reader.step(1.0, *frame(), None, None, None) == pytest.approx(15 / 3.6)
+  assert reader.step(1.0, *frame(), None, None, None, None) == pytest.approx(15 / 3.6)
   assert reader.speed_limit == pytest.approx(15 / 3.6)
 
 
 def test_steps_once_a_second(reader):
   assert reader.due(0.0)
-  reader.step(0.0, *frame(), None, None, None)
+  reader.step(0.0, *frame(), None, None, None, None)
   assert not reader.due(0.9)
   assert reader.due(1.0)
 
 
 def test_the_groups_go_in_side_by_side(reader):
-  reader.step(1.0, *frame(), (30.0, 36.0), 1_770_000_000.0, 'DE')
+  reader.step(1.0, *frame(), (30.0, 36.0), 1_770_000_000.0, 'DE', 15.0)
   _, extra, _ = reader.network.calls[0]
   assert extra.shape == (1, SIZE)
   at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:3])
   assert np.array_equal(extra[0, at:at + 3], brain_inputs.lead_row(30.0, 36.0))
-  assert np.array_equal(extra[0, -brain_inputs.INPUT_SIZES['country']:], brain_inputs.country_row('DE'))
+  at += brain_inputs.INPUT_SIZES['lead']
+  assert np.array_equal(extra[0, at:at + brain_inputs.INPUT_SIZES['country']], brain_inputs.country_row('DE'))
+  assert np.array_equal(extra[0, -brain_inputs.INPUT_SIZES['speed']:], brain_inputs.speed_row(15.0))
 
 
 def test_a_sign_read_reaches_the_network(reader):
   for at in (0.0, 0.2, 0.4, 0.6):
     reader.add_signs(at, [{'class': 'maximum_speed:80', 'confidence': 0.99}])
-  reader.step(1.0, *frame(), None, None, None)
+  reader.step(1.0, *frame(), None, None, None, None)
   assert reader.signs.number == 80
   assert reader.network.calls[0][1][0, 0] == pytest.approx(80 / brain_inputs.SIGN_KPH_SCALE)
 
@@ -106,7 +108,7 @@ def test_a_brain_trained_with_plates_gets_the_plate(vision):
   reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'plates': True}), vision, 64, 32)
   read_hours(reader)
   assert reader.signs.number == 30
-  reader.step(1.0, *frame(), None, None, None)
+  reader.step(1.0, *frame(), None, None, None, None)
   at = brain_inputs.INPUT_SIZES['signs']
   plate = reader.network.calls[0][1][0, at:at + brain_inputs.INPUT_SIZES['plate']]
   assert plate[brain_inputs.PLATES.index('time')] == 1.0 and plate.sum() == 1.0
@@ -120,8 +122,25 @@ def test_a_brain_trained_with_plates_gets_none_from_a_plain_number(vision):
 
 
 def test_the_memory_goes_on_and_starts_again_after_a_gap(reader):
-  reader.step(0.0, *frame(), None, None, None)
-  reader.step(1.0, *frame(), None, None, None)
+  reader.step(0.0, *frame(), None, None, None, None)
+  reader.step(1.0, *frame(), None, None, None, None)
   assert reader.network.calls[1][2][0, 0] == 1
-  reader.step(7.0, *frame(), None, None, None)
+  reader.step(7.0, *frame(), None, None, None, None)
   assert reader.network.calls[2][2][0, 0] == 0
+
+
+def test_it_gets_the_pedals_of_the_last_second_and_the_car_speed(reader):
+  reader.add_pedals(9.5, True, False)
+  reader.add_pedals(9.6, False, False)
+  reader.step(10.0, *frame(), None, None, None, 15.0)
+  reader.step(11.0, *frame(), None, None, None, None)
+  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:5])
+  first, second = (call[1][0][at:] for call in reader.network.calls)
+  assert list(first) == [1, 0, 1, 0.5, 1]
+  assert list(second) == [0, 0, 1, 0, 0]
+
+
+def test_a_pedal_is_not_known_before_the_first_car_state(reader):
+  reader.step(1.0, *frame(), None, None, None, None)
+  at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:5])
+  assert list(reader.network.calls[0][1][0][at:at + 3]) == [0, 0, 0]

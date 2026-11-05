@@ -66,7 +66,8 @@ validity flag. Mixed mode can use a current map fallback; Vision Only cannot.
 
 When the release has a `brain` (`speed_limits.json`, `brain.onnx`), it is the vision limit: "Map Data + Vision" stays the one
 choice in sunnylink and the resolver does not change. `brain.BrainReader` steps once a second with the frame, what `brain_inputs.py`
-makes of the signs read, the car ahead (`radarState`), the local hour and the country from GPS. The speed it says is
+makes of the signs read, the car ahead (`radarState`), the local hour and the country from GPS, gas, brake and the car's speed
+(`carState`). The speed it says is
 `speedLimit`, with `speedLimitReason` "brain". The rules of `SpeedLimitMemory`, the road-type network and `LimitAhead` do not run
 then; SignNet, the classifier and the distance to a sign do.
 

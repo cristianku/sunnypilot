@@ -9,19 +9,20 @@ AND THE CAR'S OWN SIGNALS ONLY; THE COUNTRY IS THE ONLY THING GPS GIVES, AS IT D
 
 What the brain is given beside the picture, frame by frame, all from what comes at or before the frame. One file for the
 car and for the training: the server loads this very file by its path (numpy only, nothing of openpilot), so that what the
-network learned on is what it gets on the car, and the checkpoint keeps the hash of the file it was trained with. Nothing
-on the car imports it yet: the brain has no network there.
+network learned on is what it gets on the car, and the checkpoint keeps the hash of the file it was trained with.
 
 The groups, each one apart so that a comparison can leave it out:
 
 - signs: the number confirmed as the limit confirms it (vision.SpeedLimitMemory's own rule), what kind of sign gave it, its
   age, whether an end was confirmed since, whether it was read in the last second; and the last single reading, since one
   frame is all a far or covered sign may give. No limit is decided here: the network weighs them;
-- plate: the panel below the number confirmed. Unknown until the reader says it;
+- plate: the panel below the number confirmed: hours when the classifier read a number with hours, else unknown;
 - hour: the local hour, on a circle, so that a limit of some hours can be told from the rest. The network decides, no code
   turns a plate and an hour into a limit;
 - lead: distance and speed of the car ahead;
-- country: the last one GPS gave, none before the first.
+- country: the last one GPS gave, none before the first;
+- pedals: gas and brake pressed at some moment of the last second, as carState says them;
+- speed: the car's own speed.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -34,10 +35,14 @@ SIGN_KPH_SCALE = 130.0
 SIGN_AGE_SCALE = math.log1p(3600.0)
 LEAD_METRES_SCALE = 100.0
 LEAD_METRES_MAX = 200.0
+SPEED_MAX = 60.0  # m/s
+SPEED_SCALE = 30.0
+PEDAL_SECONDS = 1.0
 MEMORY_GAP_SECONDS = 5.0  # longer without a frame: its memory starts again from zeros
 # The hours from UTC in winter, of the countries with the EU's summer time. Arithmetic on UTC: a comma may have no time zones.
 WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
-INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1}
+INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1, "pedals": 3,
+               "speed": 2}
 
 
 class SignInputs:
@@ -133,6 +138,38 @@ def country_row(name: str | None) -> np.ndarray:
   """One of COUNTRIES, the last place for any other and for none."""
   row = np.zeros(INPUT_SIZES["country"], dtype=np.float32)
   row[COUNTRIES.index(name) if name in COUNTRIES else len(COUNTRIES)] = 1.0
+  return row
+
+
+class PedalInputs:
+  """Gas and brake of every carState: add(), then row() at the frame."""
+
+  def __init__(self):
+    self.gas_at = -math.inf
+    self.brake_at = -math.inf
+    self.known = False
+
+  def add(self, now: float, gas: bool, brake: bool) -> None:
+    self.known = True
+    if gas:
+      self.gas_at = now
+    if brake:
+      self.brake_at = now
+
+  def row(self, now: float) -> np.ndarray:
+    """Gas pressed in the last second, brake pressed in the last second, known."""
+    row = np.zeros(INPUT_SIZES["pedals"], dtype=np.float32)
+    row[0] = now - self.gas_at <= PEDAL_SECONDS
+    row[1] = now - self.brake_at <= PEDAL_SECONDS
+    row[2] = self.known
+    return row
+
+
+def speed_row(metres_per_second: float | None) -> np.ndarray:
+  """The speed clipped to 0..SPEED_MAX, over SPEED_SCALE, and known."""
+  row = np.zeros(INPUT_SIZES["speed"], dtype=np.float32)
+  if metres_per_second is not None and math.isfinite(metres_per_second):
+    row[:] = min(max(float(metres_per_second), 0.0), SPEED_MAX) / SPEED_SCALE, 1.0
   return row
 
 

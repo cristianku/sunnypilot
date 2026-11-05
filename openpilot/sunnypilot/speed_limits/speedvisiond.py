@@ -168,6 +168,8 @@ def main() -> None:
       v_ego = state.vEgo
       distance.add_speed(event.logMonoTime * 1e-9, v_ego)
       motion.add_car_state(now, state.steeringAngleDeg, state.leftBlinker, state.rightBlinker, state.yawRate)
+      if reader is not None:
+        reader.add_pedals(now, state.gasPressed, state.brakePressed)
     for event in messaging.drain_sock(car["deviceMotion"]):
       yaw = event.deviceMotion.angularVelocityDevice
       motion.add_device_motion(now, yaw.z, yaw.valid)
@@ -197,7 +199,7 @@ def main() -> None:
       if reader.due(now):
         # Right after SignNet, while the GPU is still free of the driving model.
         unix = gps_clock[0] + now - gps_clock[1] if gps_clock is not None else None
-        reader.step(now, y, uv, lead, unix, gps_country)
+        reader.step(now, y, uv, lead, unix, gps_country, v_ego)
       raw = vision.raw_reading(signs)
       if raw is not None:
         memory.note_raw(raw)

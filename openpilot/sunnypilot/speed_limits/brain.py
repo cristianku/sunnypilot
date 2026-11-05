@@ -39,6 +39,7 @@ class BrainReader:
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
     self.last_step = -math.inf
+    self.pedals = brain_inputs.PedalInputs()
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
     """A frame's signs as vision.read_signs gives them. Their plates only to a brain trained with plates (its contract's
@@ -48,20 +49,25 @@ class BrainReader:
     else:
       self.signs.add(now, [(sign["class"], sign["confidence"], self.class_plate(sign["class"])) for sign in signs])
 
+  def add_pedals(self, now: float, gas: bool, brake: bool) -> None:
+    """Every carState."""
+    self.pedals.add(now, gas, brake)
+
   def due(self, now: float) -> bool:
     return now - self.last_step >= self.period
 
   def step(self, now: float, y: np.ndarray, uv: np.ndarray, lead: tuple[float, float] | None, unix_seconds: float | None,
-           country: str | None) -> float:
+           country: str | None, v_ego: float | None) -> float:
     """lead: metres and km/h of the car ahead, None without one; unix_seconds: the GPS clock now, None before a fix; country:
-    the last one GPS gave, None before the first."""
+    the last one GPS gave, None before the first; v_ego: the car's speed (m/s), None before the first carState."""
     if now - self.last_step > self.memory_gap:
       self.hidden = np.zeros_like(self.hidden)
     self.last_step = now
     metres, kph = lead if lead is not None else (None, None)
     rows = {"signs": self.signs.features(now), "plate": self.signs.plate_row(),
             "hour": brain_inputs.hour_row(brain_inputs.local_hour(unix_seconds, country)),
-            "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country)}
+            "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
+            "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
