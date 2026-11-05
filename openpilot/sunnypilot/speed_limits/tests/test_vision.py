@@ -950,7 +950,7 @@ def test_sign_distance_lead_and_display_size_are_settings(monkeypatch):
   taken = vision.apply_settings({"distance_lead_seconds": 0.5, "distance_lead_metres": 20.0,
                                  "variable_display_diameter": 1.6})
   assert taken == {"distance_lead_seconds": 0.5, "variable_display_diameter": 1.6}
-  assert (vision.DISTANCE_LEAD_SECONDS, vision.DISTANCE_LEAD_METRES, vision.VARIABLE_DISPLAY_DIAMETER) == (0.5, 1.8, 1.6)
+  assert (vision.DISTANCE_LEAD_SECONDS, vision.DISTANCE_LEAD_METRES, vision.VARIABLE_DISPLAY_DIAMETER) == (0.5, 6.8, 1.6)
 
 
 def test_sign_distance_needs_the_focal_length():

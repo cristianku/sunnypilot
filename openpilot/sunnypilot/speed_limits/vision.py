@@ -179,7 +179,8 @@ LIMIT_STATES = ("limit", "none", "unknown")
 # The distance shown is shorter by DISTANCE_LEAD_SECONDS x the speed + DISTANCE_LEAD_METRES. Without it the shown
 # zero came late (Data › Sign distance, 28 signs marked by hand): the frame is already old when it is read, the networks
 # take their time before the message goes, each value stays on the screen for speedvisiond's PERIOD (0.2 s), and the zero
-# a person marks is the frame where the sign leaves the picture, a few metres before the car passes it.
+# a person marks is the frame where the sign leaves the picture, a few metres before the car passes it. 20 signs marked
+# on builds with it (5 Nov 2026) still came about 5 m late at any speed, so the metres went from 1.8 to 6.8.
 ROUND_SIGNS = ("maximum_speed", MAXIMUM_SPEED_HOURS, "cancellation")
 VARIABLE_DISPLAY = "variable_display"
 VARIABLE_DISPLAY_DIAMETER = 1.4
@@ -192,7 +193,7 @@ ROAD_SIGN_SPREAD = 0.4
 DISTANCE_SIDE_NOISE = 0.1
 DISTANCE_SECONDS = 15.0
 DISTANCE_LEAD_SECONDS = 0.34
-DISTANCE_LEAD_METRES = 1.8
+DISTANCE_LEAD_METRES = 6.8
 # The same sign again: its class, seen within TRACK_SECONDS of the last sighting and not smaller than TRACK_SHRINK of
 # its last side (the car drives towards it). Else another sign, its sightings from scratch.
 TRACK_SECONDS = 2.0
