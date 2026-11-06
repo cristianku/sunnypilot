@@ -10,8 +10,14 @@ from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.blind_spot_indicators import BlindSpotIndicators
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.auto_speed import AutoSpeed
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.final_speed_limit import FinalSpeedLimit
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import VisionSpeedLimit
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import VisionSpeedLimit, SIZE, MARGIN, GAP
 from openpilot.selfdrive.ui.ui_state import ui_state
+
+# The GPU icon (HudRenderer._draw_model_source) has its right edge 10 px and its top 61 px from the corner of its rect:
+# where the squares go, drawn after it. These shorten its rect to take it left of them, its top level with the corner
+# square's, so above the word SMART.
+MODEL_SOURCE_LEFT = MARGIN + SIZE + GAP - 10
+MODEL_SOURCE_UP = MARGIN + SIZE - 61
 
 
 class HudRendererSP(HudRenderer):
@@ -45,6 +51,12 @@ class HudRendererSP(HudRenderer):
     if self._auto_speed:
       self.auto_speed.render(rect)
     self.blind_spot_indicators.render(rect)
+
+  def _draw_model_source(self, rect: rl.Rectangle) -> None:
+    # This icon says if the big model runs, so nothing of ours goes over it.
+    if self._auto_speed or ui_state.speed_limit_final_display or ui_state.speed_limit_vision_display:
+      rect = rl.Rectangle(rect.x, rect.y, rect.width - MODEL_SOURCE_LEFT, rect.height - MODEL_SOURCE_UP)
+    super()._draw_model_source(rect)
 
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
     # Smartspeed: the set speed is not the speed, the word SMART says so instead. Its fade still
