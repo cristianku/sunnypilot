@@ -16,7 +16,7 @@ from openpilot.system.ui.widgets import Widget
 
 SIZE = 72
 MARGIN = 12
-# Between the squares, and under the road type: at its biggest the vision square's pulse (PULSE_GROW * SIZE / 2, 6.5 px
+# Between the squares, and over the road type: at its biggest the vision square's pulse (PULSE_GROW * SIZE / 2, 6.5 px
 # a side, its border 2 px more) only slides under what is drawn after it, the road type.
 GAP = 8
 ROUNDNESS = 0.3
@@ -34,7 +34,7 @@ PULSE_GROW = 0.18
 # The small text on top of a square, where the eye would be: the sign's distance here, the final limit's source.
 SOURCE_FONT_SIZE = 18
 SOURCE_TOP = 7
-# Above the vision square, small and fuchsia, what the road-type network sees (a car park, a town...), kept inside the
+# Under the vision square, small and fuchsia, what the road-type network sees (a car park, a town...), kept inside the
 # screen ("expressway" is wider than the square), clear of the square's pulse.
 ROAD_FONT_SIZE = 20
 ROAD_GAP = GAP
@@ -46,12 +46,12 @@ DARK_GREY = rl.Color(40, 40, 40, 115)
 GREY = rl.Color(145, 155, 149, 255)
 
 
-def vision_box(rect: rl.Rectangle, above_final: bool = False) -> rl.Rectangle:
-  """On the right, out of the steering wheel's way (the left holds the wheel, the lead car and the distance bars),
-  in the bottom right corner, over the end of the torque bar, or right above the final limit when that takes the corner
-  (final_speed_limit.final_box). The word SMART goes left of this square."""
-  above = SIZE + GAP if above_final else 0
-  return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE - above, SIZE, SIZE)
+def vision_box(rect: rl.Rectangle, beside_final: bool = False) -> rl.Rectangle:
+  """On the right, out of the steering wheel's way (the left holds the wheel, the lead car and the distance bars), and
+  at the top, as the bottom right corner holds the GPU icon of the big model: in the top right corner, or right beside
+  the final limit when that takes the corner (final_speed_limit.final_box). The word SMART goes left of this square."""
+  beside = SIZE + GAP if beside_final else 0
+  return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE - beside, rect.y + MARGIN, SIZE, SIZE)
 
 
 class VisionSpeedLimit(Widget):
@@ -59,7 +59,7 @@ class VisionSpeedLimit(Widget):
   Vision or Vision Only: a fuchsia square with an eye and the limit in white, always visible, over an alert too (the
   Dashcam Mode alert stays for the whole drive). The drawing does not change the speed. A dark square with a dash means
   no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read, even one
-  that gives the limit already shown. Above it the kind of road the network sees. While the network sees a round sign
+  that gives the limit already shown. Under it the kind of road the network sees. While the network sees a round sign
   or a motorway sign or its end ahead, the distance to it replaces the eye. Only the camera's reading is drawn here,
   as speedvisiond works from the camera and the car alone."""
   def __init__(self):
@@ -121,5 +121,5 @@ class VisionSpeedLimit(Widget):
     if self._road_type:
       size = measure_text_cached(self._font, self._road_type, ROAD_FONT_SIZE)
       road_x = min(box.x + (SIZE - size.x) / 2, rect.x + rect.width - MARGIN - size.x)
-      rl.draw_text_ex(self._font, self._road_type, rl.Vector2(road_x, box.y - ROAD_GAP - size.y), ROAD_FONT_SIZE, 0,
+      rl.draw_text_ex(self._font, self._road_type, rl.Vector2(road_x, box.y + SIZE + ROAD_GAP), ROAD_FONT_SIZE, 0,
                       FUCHSIA_LIGHT)

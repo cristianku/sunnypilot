@@ -28,7 +28,7 @@ GREY = rl.Color(145, 155, 149, 190)
 
 
 class AutoSpeed(Widget):
-  """Smartspeed (the mode Assist): the word SMART, left of the vision square in the bottom right corner, level with the
+  """Smartspeed (the mode Assist): the word SMART, left of the vision square in the top right corner, level with the
   square's bottom edge. The car drives to the limit, the set speed only engages, so the set speed is not shown. Always
   drawn, over an alert too: it is a state that holds for the drive. Pea green while Speed Limit Assist drives to a
   limit; grey while no limit is in force (not engaged, or no limit known). A + or - on the car does nothing, so the word blinks for a second, only

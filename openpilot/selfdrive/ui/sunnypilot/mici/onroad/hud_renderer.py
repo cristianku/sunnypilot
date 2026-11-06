@@ -10,14 +10,8 @@ from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.blind_spot_indicators import BlindSpotIndicators
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.auto_speed import AutoSpeed
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.final_speed_limit import FinalSpeedLimit
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import VisionSpeedLimit, SIZE, MARGIN, GAP
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import VisionSpeedLimit
 from openpilot.selfdrive.ui.ui_state import ui_state
-
-# The GPU icon (HudRenderer._draw_model_source) has its right edge 10 px and its top 61 px from the corner of its rect:
-# where the squares go, drawn after it. These shorten its rect to take it left of them, its top level with the corner
-# square's, so above the word SMART.
-MODEL_SOURCE_LEFT = MARGIN + SIZE + GAP - 10
-MODEL_SOURCE_UP = MARGIN + SIZE - 61
 
 
 class HudRendererSP(HudRenderer):
@@ -43,20 +37,14 @@ class HudRendererSP(HudRenderer):
 
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
-    # On the right, clear of the steering wheel and the torque bar, all under the blind spot warning. Smartspeed: the
-    # vision square with the road type on top, SMART left of it, in the corner. Information, Warning and Assist: the
-    # final limit in the corner, the vision square above it when it is on.
+    # At the top right, clear of the steering wheel and of the GPU icon in the bottom right corner, all under the blind
+    # spot warning. Smartspeed: the vision square with the road type under it, SMART left of it, in the corner.
+    # Information, Warning and Assist: the final limit in the corner, the vision square left of it when it is on.
     self.vision_speed_limit.render(rect)
     self.final_speed_limit.render(rect)
     if self._auto_speed:
       self.auto_speed.render(rect)
     self.blind_spot_indicators.render(rect)
-
-  def _draw_model_source(self, rect: rl.Rectangle) -> None:
-    # This icon says if the big model runs, so nothing of ours goes over it.
-    if self._auto_speed or ui_state.speed_limit_final_display or ui_state.speed_limit_vision_display:
-      rect = rl.Rectangle(rect.x, rect.y, rect.width - MODEL_SOURCE_LEFT, rect.height - MODEL_SOURCE_UP)
-    super()._draw_model_source(rect)
 
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
     # Smartspeed: the set speed is not the speed, the word SMART says so instead. Its fade still

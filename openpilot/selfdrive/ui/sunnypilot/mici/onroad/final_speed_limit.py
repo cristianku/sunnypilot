@@ -22,12 +22,12 @@ FINAL = rl.Color(0, 0, 0, 140)  # see-through black, the white limit and its bor
 
 
 def final_box(rect: rl.Rectangle) -> rl.Rectangle:
-  """The bottom right corner: the final limit, or the vision square without it."""
-  return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE, SIZE, SIZE)
+  """The top right corner: the final limit, or the vision square without it."""
+  return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + MARGIN, SIZE, SIZE)
 
 
 class FinalSpeedLimit(Widget):
-  """The resolver's limit with its offset (speedLimitFinalLast), in the bottom right corner, with Information, Warning
+  """The resolver's limit with its offset (speedLimitFinalLast), in the top right corner, with Information, Warning
   and Assist: with Smartspeed only the vision square shows. The
   resolver weighs the map, the car and the network as the Speed Limit Source says; the source it took is named on top
   (MAP, CAR or CAM), and with Speed Limit Assist the car drives to this limit. Grey while only the last limit holds.
