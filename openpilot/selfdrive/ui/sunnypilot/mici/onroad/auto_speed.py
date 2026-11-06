@@ -22,16 +22,16 @@ BLINK_RATE = 6  # half blinks a second
 ButtonType = car.CarState.ButtonEvent.Type
 CRUISE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.resumeCruise, ButtonType.setCruise)
 
-SHADOW = rl.Color(0, 0, 0, 90)  # the word has no square behind it: this keeps it readable on a bright road
-GREEN = rl.Color(150, 255, 175, 170)  # light and see-through
-GREY = rl.Color(145, 155, 149, 170)
+BASELINE = 0.8  # of the line height, Inter's: the capitals stand on it
+GREEN = rl.Color(125, 205, 50, 190)  # pea green, see-through
+GREY = rl.Color(145, 155, 149, 190)
 
 
 class AutoSpeed(Widget):
-  """Smartspeed (the mode Assist): the word SMART, left of the vision square, in the bottom right corner.
-  The car drives to the limit, the set speed only engages, so the set speed is not shown. Always drawn, over an alert
-  too: it is a state that holds for the drive. Light green while Speed Limit Assist drives to a limit; grey while no limit is
-  in force (not engaged, or no limit known). A + or - on the car does nothing, so the word blinks for a second, only
+  """Smartspeed (the mode Assist): the word SMART, left of the vision square in the bottom right corner, level with the
+  square's bottom edge. The car drives to the limit, the set speed only engages, so the set speed is not shown. Always
+  drawn, over an alert too: it is a state that holds for the drive. Pea green while Speed Limit Assist drives to a
+  limit; grey while no limit is in force (not engaged, or no limit known). A + or - on the car does nothing, so the word blinks for a second, only
   while already engaged: the press that engages does not count."""
   def __init__(self):
     super().__init__()
@@ -70,6 +70,5 @@ class AutoSpeed(Widget):
 
     size = measure_text_cached(self._font, TEXT, FONT_SIZE)
     box = vision_box(rect)
-    position = rl.Vector2(box.x - GAP - size.x, box.y + (SIZE - size.y) / 2)
-    rl.draw_text_ex(self._font, TEXT, rl.Vector2(position.x + 2, position.y + 2), FONT_SIZE, 0, SHADOW)
+    position = rl.Vector2(box.x - GAP - size.x, box.y + SIZE - size.y * BASELINE)
     rl.draw_text_ex(self._font, TEXT, position, FONT_SIZE, 0, GREEN if self._driving else GREY)
