@@ -22,7 +22,7 @@ FINAL = rl.Color(0, 0, 0, 140)  # see-through black, the white limit and its bor
 
 
 def final_box(rect: rl.Rectangle) -> rl.Rectangle:
-  """The bottom right corner: the final limit, or smartspeed alone without the vision square."""
+  """The bottom right corner: the final limit, or the word SMART of Smartspeed."""
   return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE, SIZE, SIZE)
 
 

@@ -49,7 +49,7 @@ GREY = rl.Color(145, 155, 149, 255)
 def vision_box(rect: rl.Rectangle) -> rl.Rectangle:
   """On the right, out of the steering wheel's way (the left holds the wheel, the lead car and the distance bars),
   right above the bottom right corner (final_speed_limit.final_box). Above it, not in it: the torque bar runs along the
-  bottom up to the corner and grows up to 82 px from the bottom at full torque, and smartspeed goes left of this square."""
+  bottom up to the corner and grows up to 82 px from the bottom at full torque, and the word SMART goes in the corner."""
   return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - 2 * SIZE - GAP, SIZE, SIZE)
 
 
