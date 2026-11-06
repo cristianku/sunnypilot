@@ -95,9 +95,10 @@ it looks nearer than it is; when the class changes the sightings start again, as
 A number valid only on a wet road (a German 80 with "bei Nässe" below it) is the class `maximum_speed_wet:80`, the same way:
 one box, its number for the rules at any weather, measured by its width. `class_plate` gives "wet", and it reaches the brain
 only when the contract's `step` says `"wet": true`: `plate_wet` is a group of its own, so the `plate` group of a published brain
-stays as it is and such a brain reads a plain 80. The brain also gets the front wipers (`wipers`, from
-`carStateSP.frontWipers`: off, on, low, high, unknown on a car that does not say), since a picture rarely shows a wet road.
-The network decides: no code turns a plate and the wipers into a limit. On a road still wet with the wipers off it does not know.
+stays as it is and such a brain reads a plain 80. Whether the road is wet is for the picture to say. The brain also gets the
+front wipers as a clue (`wipers`, from `carStateSP.frontWipers`: off, on, low, high, unknown on a car that does not say), hidden
+on half of the drives in training so that it does not lean on them. The network decides: no code turns a plate and the wipers
+into a limit. A road still wet with the wipers off is left to the picture.
 
 ## Full resolution switches
 

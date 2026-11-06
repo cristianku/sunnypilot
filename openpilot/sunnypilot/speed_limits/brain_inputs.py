@@ -21,8 +21,8 @@ The groups, each one apart so that a comparison can leave it out:
 - plate_wet: that plate says the number holds only on a wet road, when the classifier read so. A plate of its own group and
   not one more of PLATES, so that the plate group of a published brain stays as it is;
 - wipers: the state of the front wipers as the car says it, off to fast, or unknown: a car that does not send it, or a log
-  without its CAN. What makes a wet road known at all: the picture alone shows it too rarely to learn. The network decides,
-  no code turns a plate and the wipers into a limit;
+  without its CAN. A clue beside the picture, which is what says the road is wet: the training hides it on half of the drives,
+  so that a brain does not lean on it. The network decides, no code turns a plate and the wipers into a limit;
 - hour: the local hour, on a circle, so that a limit of some hours can be told from the rest. The network decides, no code
   turns a plate and an hour into a limit;
 - lead: distance and speed of the car ahead;
