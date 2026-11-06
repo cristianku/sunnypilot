@@ -43,7 +43,6 @@ class BrainReader:
     self.speed_limit = 0.0
     self.last_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
-    self.wipers: int | None = None
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
     """A frame's signs as vision.read_signs gives them. A plate only to a brain trained with that kind of plate, and their
@@ -63,10 +62,6 @@ class BrainReader:
     """Every carState."""
     self.pedals.add(now, gas, brake)
 
-  def add_wipers(self, name: str) -> None:
-    """Every carStateSP: its frontWipers, one of brain_inputs.WIPERS, or anything else when the car does not say."""
-    self.wipers = brain_inputs.WIPERS.index(name) if name in brain_inputs.WIPERS else None
-
   def due(self, now: float) -> bool:
     return now - self.last_step >= self.period
 
@@ -82,7 +77,7 @@ class BrainReader:
             "hour": brain_inputs.hour_row(brain_inputs.local_hour(unix_seconds, country)),
             "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
             "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego),
-            "plate_wet": self.signs.plate_wet_row(), "wipers": brain_inputs.wipers_row(self.wipers)}
+            "plate_wet": self.signs.plate_wet_row()}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6

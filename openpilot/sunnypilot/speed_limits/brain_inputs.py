@@ -19,10 +19,8 @@ The groups, each one apart so that a comparison can leave it out:
 - plate: the panel below the number confirmed: hours when the classifier read a number with hours, else unknown;
 - plate_hours: the hours written on that plate, from and to, when the classifier read them, else unknown;
 - plate_wet: that plate says the number holds only on a wet road, when the classifier read so. A plate of its own group and
-  not one more of PLATES, so that the plate group of a published brain stays as it is;
-- wipers: the state of the front wipers as the car says it, off to fast, or unknown: a car that does not send it, or a log
-  without its CAN. A clue beside the picture, which is what says the road is wet: the training hides it on half of the drives,
-  so that a brain does not lean on it. The network decides, no code turns a plate and the wipers into a limit;
+  not one more of PLATES, so that the plate group of a published brain stays as it is. Whether the road is wet the network
+  sees in the picture: no code turns a plate and a wet road into a limit;
 - hour: the local hour, on a circle, so that a limit of some hours can be told from the rest. The network decides, no code
   turns a plate and an hour into a limit;
 - lead: distance and speed of the car ahead;
@@ -44,7 +42,6 @@ LEAD_METRES_MAX = 200.0
 SPEED_MAX = 60.0  # m/s
 SPEED_SCALE = 30.0
 PEDAL_SECONDS = 1.0
-WIPERS = ("off", "on", "low", "high")  # the front wipers as the car says them (cereal CarStateSP.frontWipers)
 MEMORY_GAP_SECONDS = 5.0  # longer without a frame: its memory starts again from zeros
 # The hours from UTC in winter, of the countries with the EU's summer time. Arithmetic on UTC: a comma may have no time zones.
 WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
@@ -54,7 +51,7 @@ WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
 SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467",
                "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244")
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
-               "pedals": 3, "speed": 2, "plate_wet": 1, "wipers": len(WIPERS) + 1}
+               "pedals": 3, "speed": 2, "plate_wet": 1}
 
 
 class SignInputs:
@@ -192,14 +189,6 @@ class PedalInputs:
     row[1] = now - self.brake_at <= PEDAL_SECONDS
     row[2] = self.known
     return row
-
-
-def wipers_row(state: int | None) -> np.ndarray:
-  """Its place in WIPERS and known; None: unknown."""
-  row = np.zeros(INPUT_SIZES["wipers"], dtype=np.float32)
-  if state is not None:
-    row[state] = row[-1] = 1.0
-  return row
 
 
 def speed_row(metres_per_second: float | None) -> np.ndarray:

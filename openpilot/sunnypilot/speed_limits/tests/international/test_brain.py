@@ -134,7 +134,7 @@ def read_wet(reader):
 
 
 def test_a_brain_trained_with_wet_plates_gets_them(vision):
-  groups = [*GROUPS, 'plate_wet', 'wipers']
+  groups = [*GROUPS, 'plate_wet']
   reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'groups': groups, 'wet': True}), vision, 64, 32)
   read_wet(reader)
   reader.step(1.0, *frame(), None, None, None, None)
@@ -154,15 +154,6 @@ def test_a_brain_trained_with_wet_plates_and_no_hours_plates_takes_a_number_with
   reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'wet': True}), vision, 64, 32)
   read_hours(reader)
   assert np.array_equal(reader.signs.plate_row(), unknown_plate())
-
-
-@pytest.mark.parametrize('name, row', [('off', [1, 0, 0, 0, 1]), ('on', [0, 1, 0, 0, 1]), ('high', [0, 0, 0, 1, 1]), ('unknown', [0, 0, 0, 0, 0])])
-def test_the_wipers_go_in_as_the_car_says_them(vision, name, row):
-  groups = [*GROUPS, 'wipers']
-  reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'groups': groups}), vision, 64, 32)
-  reader.add_wipers(name)
-  reader.step(1.0, *frame(), None, None, None, None)
-  assert list(reader.network.calls[0][1][0, -5:]) == row
 
 
 def read_with_hours(reader):

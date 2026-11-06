@@ -22,7 +22,7 @@ While a round sign (a number, the end of a limit) or a motorway or expressway si
 to it from its size on the camera and the metres driven (signDistance, vision.SignDistance) shows on the screen for
 the driver to check. A limit read on such a sign starts at the sign, as the map's: until the car gets there it is the
 limit ahead, with its distance (speedLimitAhead, speedLimitAheadDistance, vision.LimitAhead).
-A release with a brain (brain.BrainReader) is another vision limit: what was read, the car ahead, the wipers, the hour and the
+A release with a brain (brain.BrainReader) is another vision limit: what was read, the car ahead, the hour and the
 country go into that network once a second, the speed it says is speedLimit, and neither the rules of the memory, nor the road-type
 network, nor the limit ahead are run. The distance to a sign stays on the screen; signRead pulses on a number confirmed.
 With the Developer switch Read Signs at Full Resolution the classifier's crops come from the full stream of camerad, the
@@ -111,7 +111,6 @@ def main() -> None:
   # The car's own signals for the road-type network, every message (carState 100 Hz, deviceMotion 20 Hz).
   car = {name: messaging.sub_sock(name, conflate=False) for name in ("carState", "deviceMotion")}
   radar = messaging.sub_sock("radarState", conflate=True)
-  wipers = messaging.sub_sock("carStateSP", conflate=True)
 
   client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_NARROW_ROAD, True)
   while not client.connect(False):
@@ -177,9 +176,6 @@ def main() -> None:
     for event in messaging.drain_sock(radar):
       one = event.radarState.leadOne
       lead = (one.dRel, one.vLead * 3.6) if one.present else None
-    for event in messaging.drain_sock(wipers):
-      if reader is not None:
-        reader.add_wipers(str(event.carStateSP.frontWipers))
     if now < next_frame:
       continue
     next_frame = now + PERIOD

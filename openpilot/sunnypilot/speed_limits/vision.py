@@ -37,7 +37,7 @@ CONFIRM_SECONDS = 1.5
 # A number valid at some hours, its plate below it, one box around both. To the rules it is its number: no code turns the
 # hours into a limit, that is the brain's (class_plate).
 MAXIMUM_SPEED_HOURS = "maximum_speed_hours"
-# The same for a number valid only on a wet road (the German "bei Nässe"): no code reads the wipers either.
+# The same for a number valid only on a wet road (the German "bei Nässe"): no code turns it into a limit either.
 MAXIMUM_SPEED_WET = "maximum_speed_wet"
 PLATED_KINDS = (MAXIMUM_SPEED_HOURS, MAXIMUM_SPEED_WET)  # taller by their plate
 SPEED_KINDS = ("maximum_speed", *PLATED_KINDS, "variable_display", "zone", "road_marking")
