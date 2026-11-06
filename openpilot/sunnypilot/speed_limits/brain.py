@@ -35,26 +35,37 @@ class BrainReader:
     self.memory_gap = contract["step"]["memory_gap_seconds"]
     self.image = vision.RoadTypeInput(width, height)
     self.signs = brain_inputs.SignInputs(vision)
-    self.class_plate = vision.class_plate if contract["step"].get("plates", False) else None
+    self.class_plate = vision.class_plate
+    self.plates = {plate for plate, trained in (("time", contract["step"].get("plates", False)),
+                                                ("wet", contract["step"].get("wet", False))) if trained}
     self.class_hours = vision.class_hours if contract["step"].get("hours", False) else lambda name: None
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
     self.last_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
+    self.wipers: int | None = None
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
-    """A frame's signs as vision.read_signs gives them. Their plates only to a brain trained with plates, and their hours
-    only to one trained with hours (its contract's step): to another one, trained with them unknown on every frame, they
-    would change the speed at random."""
-    if self.class_plate is None:
+    """A frame's signs as vision.read_signs gives them. A plate only to a brain trained with that kind of plate, and their
+    hours only to one trained with hours (its contract's step): to another one, trained with them unknown on every frame,
+    they would change the speed at random."""
+    if not self.plates:
       self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
     else:
-      self.signs.add(now, [(sign["class"], sign["confidence"], self.class_plate(sign["class"]), self.class_hours(sign["class"]))
+      self.signs.add(now, [(sign["class"], sign["confidence"], self._plate(sign["class"]), self.class_hours(sign["class"]))
                            for sign in signs])
+
+  def _plate(self, name: str) -> str | None:
+    plate = self.class_plate(name)
+    return plate if plate in self.plates else None
 
   def add_pedals(self, now: float, gas: bool, brake: bool) -> None:
     """Every carState."""
     self.pedals.add(now, gas, brake)
+
+  def add_wipers(self, name: str) -> None:
+    """Every carStateSP: its frontWipers, one of brain_inputs.WIPERS, or anything else when the car does not say."""
+    self.wipers = brain_inputs.WIPERS.index(name) if name in brain_inputs.WIPERS else None
 
   def due(self, now: float) -> bool:
     return now - self.last_step >= self.period
@@ -70,7 +81,8 @@ class BrainReader:
     rows = {"signs": self.signs.features(now), "plate": self.signs.plate_row(), "plate_hours": self.signs.plate_hours_row(),
             "hour": brain_inputs.hour_row(brain_inputs.local_hour(unix_seconds, country)),
             "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
-            "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego)}
+            "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego),
+            "plate_wet": self.signs.plate_wet_row(), "wipers": brain_inputs.wipers_row(self.wipers)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6

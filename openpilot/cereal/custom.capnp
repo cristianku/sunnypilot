@@ -455,6 +455,15 @@ struct BackupManagerSP @0xf98d843bfd7004a3 {
 
 struct CarStateSP @0xb86e6369214c01c8 {
   speedLimit @0 :Float32;
+  frontWipers @1 :FrontWipers;
+
+  enum FrontWipers {
+    unknown @0;  # a car that does not say
+    off @1;
+    on @2;  # on, the speed not said
+    low @3;
+    high @4;
+  }
 }
 
 struct LiveMapDataSP @0xf416ec09499d9d19 {

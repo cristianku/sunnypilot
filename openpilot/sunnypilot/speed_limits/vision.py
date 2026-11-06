@@ -37,7 +37,10 @@ CONFIRM_SECONDS = 1.5
 # A number valid at some hours, its plate below it, one box around both. To the rules it is its number: no code turns the
 # hours into a limit, that is the brain's (class_plate).
 MAXIMUM_SPEED_HOURS = "maximum_speed_hours"
-SPEED_KINDS = ("maximum_speed", MAXIMUM_SPEED_HOURS, "variable_display", "zone", "road_marking")
+# The same for a number valid only on a wet road (the German "bei Nässe"): no code reads the wipers either.
+MAXIMUM_SPEED_WET = "maximum_speed_wet"
+PLATED_KINDS = (MAXIMUM_SPEED_HOURS, MAXIMUM_SPEED_WET)  # taller by their plate
+SPEED_KINDS = ("maximum_speed", *PLATED_KINDS, "variable_display", "zone", "road_marking")
 CANCELLATION = "cancellation"
 
 # The general limits that hold where no number is signed (km/h; None: no general limit), by country, for the kind of
@@ -181,7 +184,7 @@ LIMIT_STATES = ("limit", "none", "unknown")
 # take their time before the message goes, each value stays on the screen for speedvisiond's PERIOD (0.2 s), and the zero
 # a person marks is the frame where the sign leaves the picture, a few metres before the car passes it. 20 signs marked
 # on builds with it (5 Nov 2026) still came about 5 m late at any speed, so the metres went from 1.8 to 6.8.
-ROUND_SIGNS = ("maximum_speed", MAXIMUM_SPEED_HOURS, "cancellation")
+ROUND_SIGNS = ("maximum_speed", *PLATED_KINDS, "cancellation")
 VARIABLE_DISPLAY = "variable_display"
 VARIABLE_DISPLAY_DIAMETER = 1.4
 SIGN_DIAMETERS = {"town": 0.6, "zone30": 0.6, "rural": 0.8, "expressway": 1.0, "motorway": 1.2}
@@ -603,9 +606,9 @@ def class_speed(name: str) -> float | None:
 
 
 def class_plate(name: str) -> str | None:
-  """The plate a class says is below its number, one of brain_inputs.PLATES: "time" for a number with hours; None when it
-  does not say."""
-  return "time" if name.partition(":")[0] == MAXIMUM_SPEED_HOURS else None
+  """The plate a class says is below its number: "time" for a number with hours, one of brain_inputs.PLATES; "wet" for one
+  valid on wet roads, brain_inputs.SignInputs.plate_wet_row; None when it does not say."""
+  return {MAXIMUM_SPEED_HOURS: "time", MAXIMUM_SPEED_WET: "wet"}.get(name.partition(":")[0])
 
 
 def class_hours(name: str) -> tuple[int, int] | None:
@@ -947,7 +950,7 @@ def _lit_display(name: str) -> bool:
 def _limit_from_sign(reason: str, sign_class: str) -> bool:
   """Whether the limit of the rule reason comes from a sign of the kind sign_class (SignDistance's)."""
   kind = sign_class.partition(":")[0]
-  return (reason == "sign" and kind in ("maximum_speed", MAXIMUM_SPEED_HOURS, VARIABLE_DISPLAY)) or \
+  return (reason == "sign" and kind in ("maximum_speed", *PLATED_KINDS, VARIABLE_DISPLAY)) or \
     (reason == "end_sign" and kind == "cancellation") or (reason == "road_sign" and sign_class in ROAD_SIGN_HEIGHTS)
 
 
@@ -976,14 +979,14 @@ class SignDistance:
   def _measured(self, sign: dict, road: str | None) -> tuple[float, float, float, float, str]:
     """A sign of the frame: the distance its size gives, its side (frame pixels), its size (m), how loosely the size is
     held, its class. Seen from the side a round sign is narrower, never lower; a road sign's height stays; a number with
-    hours is taller by its plate, so its width."""
+    a plate is taller by it, so its width."""
     x1, y1, x2, y2 = sign["box"]
     if sign["class"] in ROAD_SIGN_HEIGHTS:
       side, size, spread = y2 - y1, ROAD_SIGN_HEIGHTS[sign["class"]], ROAD_SIGN_SPREAD
     elif sign["class"].partition(":")[0] == VARIABLE_DISPLAY:
       side, size, spread = max(x2 - x1, y2 - y1), VARIABLE_DISPLAY_DIAMETER, DISTANCE_DIAMETER_SPREAD
     else:
-      side = x2 - x1 if sign["class"].partition(":")[0] == MAXIMUM_SPEED_HOURS else max(x2 - x1, y2 - y1)
+      side = x2 - x1 if sign["class"].partition(":")[0] in PLATED_KINDS else max(x2 - x1, y2 - y1)
       size, spread = SIGN_DIAMETERS.get(road or "", DEFAULT_SIGN_DIAMETER), DISTANCE_DIAMETER_SPREAD
     return size / max(side, 1e-6), side, size, spread, sign["class"]
 
