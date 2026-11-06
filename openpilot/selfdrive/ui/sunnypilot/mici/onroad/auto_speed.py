@@ -7,7 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 import pyray as rl
 
 from opendbc.car.structs import car
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE, GAP, vision_box
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import GAP, vision_box
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -22,14 +22,14 @@ BLINK_RATE = 6  # half blinks a second
 ButtonType = car.CarState.ButtonEvent.Type
 CRUISE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.resumeCruise, ButtonType.setCruise)
 
-BASELINE = 0.8  # of the line height, Inter's: the capitals stand on it
+CAP_TOP = 0.2  # of the line height, Inter's: where the capitals start
 GREEN = rl.Color(125, 205, 50, 190)  # pea green, see-through
 GREY = rl.Color(145, 155, 149, 190)
 
 
 class AutoSpeed(Widget):
   """Smartspeed (the mode Assist): the word SMART, left of the vision square in the top right corner, level with the
-  square's bottom edge. The car drives to the limit, the set speed only engages, so the set speed is not shown. Always
+  square's top edge. The car drives to the limit, the set speed only engages, so the set speed is not shown. Always
   drawn, over an alert too: it is a state that holds for the drive. Pea green while Speed Limit Assist drives to a
   limit; grey while no limit is in force (not engaged, or no limit known). A + or - on the car does nothing, so the word blinks for a second, only
   while already engaged: the press that engages does not count."""
@@ -70,5 +70,5 @@ class AutoSpeed(Widget):
 
     size = measure_text_cached(self._font, TEXT, FONT_SIZE)
     box = vision_box(rect)
-    position = rl.Vector2(box.x - GAP - size.x, box.y + SIZE - size.y * BASELINE)
+    position = rl.Vector2(box.x - GAP - size.x, box.y - size.y * CAP_TOP)
     rl.draw_text_ex(self._font, TEXT, position, FONT_SIZE, 0, GREEN if self._driving else GREY)
