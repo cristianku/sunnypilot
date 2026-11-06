@@ -7,8 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 import pyray as rl
 
 from opendbc.car.structs import car
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.final_speed_limit import final_box
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import SIZE, GAP, vision_box
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -29,7 +28,7 @@ GREY = rl.Color(145, 155, 149, 170)
 
 
 class AutoSpeed(Widget):
-  """Smartspeed (the mode Assist): the word SMART, in the bottom right corner, under the vision square.
+  """Smartspeed (the mode Assist): the word SMART, left of the vision square, in the bottom right corner.
   The car drives to the limit, the set speed only engages, so the set speed is not shown. Always drawn, over an alert
   too: it is a state that holds for the drive. Light green while Speed Limit Assist drives to a limit; grey while no limit is
   in force (not engaged, or no limit known). A + or - on the car does nothing, so the word blinks for a second, only
@@ -70,7 +69,7 @@ class AutoSpeed(Widget):
       return
 
     size = measure_text_cached(self._font, TEXT, FONT_SIZE)
-    box = final_box(rect)
-    position = rl.Vector2(box.x + SIZE - size.x, box.y + (SIZE - size.y) / 2)
+    box = vision_box(rect)
+    position = rl.Vector2(box.x - GAP - size.x, box.y + (SIZE - size.y) / 2)
     rl.draw_text_ex(self._font, TEXT, rl.Vector2(position.x + 2, position.y + 2), FONT_SIZE, 0, SHADOW)
     rl.draw_text_ex(self._font, TEXT, position, FONT_SIZE, 0, GREEN if self._driving else GREY)

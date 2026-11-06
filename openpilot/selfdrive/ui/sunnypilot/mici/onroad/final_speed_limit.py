@@ -22,13 +22,13 @@ FINAL = rl.Color(0, 0, 0, 140)  # see-through black, the white limit and its bor
 
 
 def final_box(rect: rl.Rectangle) -> rl.Rectangle:
-  """The bottom right corner: the final limit, or the word SMART of Smartspeed."""
+  """The bottom right corner: the final limit, where the vision square is."""
   return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE, SIZE, SIZE)
 
 
 class FinalSpeedLimit(Widget):
   """Not drawn on the comma 4 since 5 Nov 2026 (hud_renderer.py): only the vision square shows, Cristian's choice.
-  The resolver's limit with its offset (speedLimitFinalLast), in the bottom right corner under the vision square,
+  The resolver's limit with its offset (speedLimitFinalLast), in the bottom right corner,
   shown with the same switch (Show Vision Speed Limit, or Speed Limit Source Map Data + Vision or Vision Only). The
   resolver weighs the map, the car and the network as the Speed Limit Source says; the source it took is named on top
   (MAP, CAR or CAM), and with Speed Limit Assist the car drives to this limit. Grey while only the last limit holds.

@@ -36,7 +36,7 @@ class HudRendererSP(HudRenderer):
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
     # On the right, clear of the steering wheel and the torque bar: the vision square with the road type on top,
-    # SMART in the corner under it, all under the blind spot warning. The final limit is not drawn: where
+    # SMART left of it, in the corner, all under the blind spot warning. The final limit is not drawn: where
     # vision has none the resolver takes the map, and the driver knows it.
     self.vision_speed_limit.render(rect)
     if self._auto_speed:
