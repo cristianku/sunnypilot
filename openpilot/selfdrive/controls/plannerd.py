@@ -34,6 +34,7 @@ def main():
 
   while True:
     sm.update()
+    longitudinal_planner.sla.update_buttons(sm['selfdriveStateSP'].buttonsReleaseToggle)
     if sm.updated['modelV2']:
       longitudinal_planner.update(sm)
       longitudinal_planner.publish(sm, pm)

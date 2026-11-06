@@ -48,7 +48,7 @@ def chain(candidate):
   model_spec.loader.exec_module(model)
 
   class Params:
-    values = {'SpeedLimitPolicy': 6, 'SpeedLimitOffsetType': 0, 'SpeedLimitValueOffset': 0, 'SpeedLimitMode': 3, 'IsMetric': True}
+    values = {'SpeedLimitPolicy': 6, 'SpeedLimitOffsetType': 0, 'SpeedLimitValueOffset': 0, 'SpeedLimitMode': 4, 'IsMetric': True}
 
     def get(self, name, **kw):
       return self.values.get(name, 0)

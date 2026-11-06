@@ -46,10 +46,12 @@ DARK_GREY = rl.Color(40, 40, 40, 115)
 GREY = rl.Color(145, 155, 149, 255)
 
 
-def vision_box(rect: rl.Rectangle) -> rl.Rectangle:
+def vision_box(rect: rl.Rectangle, above_final: bool = False) -> rl.Rectangle:
   """On the right, out of the steering wheel's way (the left holds the wheel, the lead car and the distance bars),
-  in the bottom right corner, over the end of the torque bar. The word SMART goes left of this square."""
-  return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE, SIZE, SIZE)
+  in the bottom right corner, over the end of the torque bar, or right above the final limit when that takes the corner
+  (final_speed_limit.final_box). The word SMART goes left of this square."""
+  above = SIZE + GAP if above_final else 0
+  return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE, rect.y + rect.height - MARGIN - SIZE - above, SIZE, SIZE)
 
 
 class VisionSpeedLimit(Widget):
@@ -86,7 +88,7 @@ class VisionSpeedLimit(Widget):
     if not ui_state.speed_limit_vision_display or ui_state.sm.recv_frame["carState"] < ui_state.started_frame:
       return
 
-    box = vision_box(rect)
+    box = vision_box(rect, ui_state.speed_limit_final_display)
     has_limit = round(self._speed_limit) > 0
     since = rl.get_time() - self._pulse_at
     pulse = math.sin(math.pi * since / PULSE_SECONDS) if 0 <= since < PULSE_SECONDS else 0.

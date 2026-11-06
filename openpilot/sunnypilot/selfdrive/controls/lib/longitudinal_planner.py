@@ -68,7 +68,7 @@ class LongitudinalPlannerSP:
 
     # Smartspeed: the set speed only engages, it is never the target, the car drives to the limit, also above it. A
     # forced deceleration always wins.
-    if self.sla.enabled and not sm['controlsState'].forceDecel:
+    if self.sla.smartspeed and not sm['controlsState'].forceDecel:
       v_cruise = self.get_engage_only_target(long_enabled, v_ego, v_cruise)
 
     # Smart Cruise Control

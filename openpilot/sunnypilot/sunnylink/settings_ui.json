@@ -784,21 +784,76 @@
         },
         {
           "id": "speed_limits",
-          "title": "Smartspeed",
-          "description": "The car finds the speed by itself, the set speed is only on and off",
+          "title": "Speed Limits",
+          "description": "Speed limit detection, offset behavior and Smartspeed",
           "items": [
             {
               "key": "SpeedLimitMode",
               "widget": "multiple_button",
-              "title": "Smartspeed",
-              "description": "The brain, the neural network that watches the road, chooses the speed. The cruise button only turns it on and off: the car drives at the speed the brain knows, also above the set speed, and + and - do nothing: the word SMART blinks to say so. Without a reading the map speed applies, and curves still slow the car down.",
+              "title": "Speed Limit Assist Mode",
+              "description": "Smartspeed: the brain, the neural network that watches the road, chooses the speed. The cruise button only turns it on and off: the car drives at the speed the brain knows, also above the set speed, and + and - do nothing: the word SMART blinks to say so. Without a reading the map speed applies, and curves still slow the car down.",
               "options": [
                 {
                   "value": 0,
                   "label": "Off"
                 },
                 {
+                  "value": 1,
+                  "label": "Information"
+                },
+                {
+                  "value": 2,
+                  "label": "Warning"
+                },
+                {
                   "value": 3,
+                  "label": "Assist",
+                  "enablement": [
+                    {
+                      "type": "any",
+                      "conditions": [
+                        {
+                          "type": "capability",
+                          "field": "has_longitudinal_control",
+                          "equals": true
+                        },
+                        {
+                          "type": "capability",
+                          "field": "has_icbm",
+                          "equals": true
+                        }
+                      ]
+                    },
+                    {
+                      "type": "not",
+                      "condition": {
+                        "type": "capability",
+                        "field": "brand",
+                        "equals": "rivian"
+                      }
+                    },
+                    {
+                      "type": "not",
+                      "condition": {
+                        "type": "all",
+                        "conditions": [
+                          {
+                            "type": "capability",
+                            "field": "brand",
+                            "equals": "tesla"
+                          },
+                          {
+                            "type": "capability",
+                            "field": "is_sp_release",
+                            "equals": true
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "value": 4,
                   "label": "Smartspeed",
                   "enablement": [
                     {
@@ -847,10 +902,54 @@
               ]
             },
             {
+              "key": "SpeedLimitPolicy",
+              "widget": "multiple_button",
+              "title": "Speed Limit Source",
+              "description": "With Smartspeed the source is Map Data + Vision by itself.",
+              "options": [
+                {
+                  "value": 0,
+                  "label": "Car State Only"
+                },
+                {
+                  "value": 1,
+                  "label": "Map Data Only"
+                },
+                {
+                  "value": 2,
+                  "label": "Car State Priority"
+                },
+                {
+                  "value": 3,
+                  "label": "Map Data Priority"
+                },
+                {
+                  "value": 4,
+                  "label": "Combined"
+                },
+                {
+                  "value": 5,
+                  "label": "Map Data + Vision"
+                },
+                {
+                  "value": 6,
+                  "label": "Vision Only"
+                }
+              ],
+              "visibility": [
+                {
+                  "type": "param_compare",
+                  "key": "SpeedLimitMode",
+                  "op": "<",
+                  "value": 4
+                }
+              ]
+            },
+            {
               "key": "SpeedLimitVisionDisplay",
               "widget": "toggle",
               "title": "Show Vision Reading",
-              "description": "With Smartspeed off, show what the network reads from the road camera, in a fuchsia square on the right of the driving screen. Information only, it does not change the speed. A dark square with a dash means no reading.",
+              "description": "Show what the network reads from the road camera, in a fuchsia square on the right of the driving screen. Information only, it does not change the speed. A dark square with a dash means no reading. Always shown with Smartspeed, and when Speed Limit Source is Map Data + Vision or Vision Only.",
               "visibility": [
                 {
                   "type": "capability",
@@ -858,9 +957,10 @@
                   "equals": "mici"
                 },
                 {
-                  "type": "param",
+                  "type": "param_compare",
                   "key": "SpeedLimitMode",
-                  "equals": 0
+                  "op": "<",
+                  "value": 4
                 }
               ]
             },
@@ -881,13 +981,6 @@
                   "value": 2,
                   "label": "Percentage"
                 }
-              ],
-              "visibility": [
-                {
-                  "type": "param",
-                  "key": "SpeedLimitMode",
-                  "equals": 3
-                }
               ]
             },
             {
@@ -902,11 +995,6 @@
                 "imperial": "mph"
               },
               "visibility": [
-                {
-                  "type": "param",
-                  "key": "SpeedLimitMode",
-                  "equals": 3
-                },
                 {
                   "type": "param_compare",
                   "key": "SpeedLimitOffsetType",

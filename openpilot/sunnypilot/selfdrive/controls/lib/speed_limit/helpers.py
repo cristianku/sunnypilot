@@ -39,11 +39,11 @@ def set_speed_limit_assist_availability(CP: car.CarParams, CP_SP: custom.CarPara
     allowed = False
 
   if not allowed:
-    if params.get("SpeedLimitMode", return_default=True) == SpeedLimitMode.assist:
+    if params.get("SpeedLimitMode", return_default=True) in (SpeedLimitMode.assist, SpeedLimitMode.smartspeed):
       params.put("SpeedLimitMode", int(SpeedLimitMode.warning), block=True)
 
-  # Smartspeed is one choice: it always uses the network, so a source without it does not stay
-  elif params.get("SpeedLimitMode", return_default=True) == SpeedLimitMode.assist and \
+  # Smartspeed always uses the network, so a source without it does not stay
+  elif params.get("SpeedLimitMode", return_default=True) == SpeedLimitMode.smartspeed and \
        params.get("SpeedLimitPolicy", return_default=True) not in (Policy.map_data_vision, Policy.vision_only):
     params.put("SpeedLimitPolicy", int(Policy.map_data_vision), block=True)
 

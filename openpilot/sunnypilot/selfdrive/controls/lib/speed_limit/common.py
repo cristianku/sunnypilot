@@ -29,3 +29,4 @@ class Mode(IntEnumBase):
   information = 1
   warning = 2
   assist = 3
+  smartspeed = 4  # the brain chooses the speed, on every car: no confirmation, the set speed only engages
