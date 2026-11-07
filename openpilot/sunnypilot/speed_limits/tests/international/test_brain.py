@@ -200,3 +200,16 @@ def test_a_pedal_is_not_known_before_the_first_car_state(reader):
   reader.step(1.0, *frame(), None, None, None, None)
   at = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS[:6])
   assert list(reader.network.calls[0][1][0][at:at + 3]) == [0, 0, 0]
+
+
+def test_it_gets_openpilot_engaged_and_what_turned_it_off(vision):
+  groups = [*GROUPS, 'engaged']
+  reader = brain.BrainReader(Network(), contract(step={'rate_hz': 1.0, 'groups': groups, 'memory_gap_seconds': 5.0}), vision, 64, 32)
+  reader.add_enabled(1.0, True)
+  reader.add_pedals(9.0, False, True)
+  reader.add_enabled(9.0, False)
+  reader.add_pedals(9.4, False, False)
+  reader.step(10.0, *frame(), None, None, None, None)
+  row = reader.network.calls[0][1][0][SIZE:]
+  assert len(row) == brain_inputs.INPUT_SIZES['engaged']
+  assert [row[0], row[1], row[3], row[4], row[5], row[6]] == [0, 1, 1, 0, 0, 1]

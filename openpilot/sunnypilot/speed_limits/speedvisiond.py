@@ -108,8 +108,9 @@ def main() -> None:
     sm.update(100)
     return signnet(x)
 
-  # The car's own signals for the road-type network, every message (carState 100 Hz, deviceMotion 20 Hz).
-  car = {name: messaging.sub_sock(name, conflate=False) for name in ("carState", "deviceMotion")}
+  # The car's own signals for the road-type network and the brain, every message (carState 100 Hz, deviceMotion 20 Hz,
+  # selfdriveState 100 Hz: whether openpilot is engaged).
+  car = {name: messaging.sub_sock(name, conflate=False) for name in ("carState", "deviceMotion", "selfdriveState")}
   radar = messaging.sub_sock("radarState", conflate=True)
 
   client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_NARROW_ROAD, True)
@@ -170,6 +171,9 @@ def main() -> None:
       motion.add_car_state(now, state.steeringAngleDeg, state.leftBlinker, state.rightBlinker, state.yawRate)
       if reader is not None:
         reader.add_pedals(now, state.gasPressed, state.brakePressed)
+    for event in messaging.drain_sock(car["selfdriveState"]):
+      if reader is not None:
+        reader.add_enabled(now, event.selfdriveState.enabled)
     for event in messaging.drain_sock(car["deviceMotion"]):
       yaw = event.deviceMotion.angularVelocityDevice
       motion.add_device_motion(now, yaw.z, yaw.valid)

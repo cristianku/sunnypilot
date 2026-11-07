@@ -27,6 +27,9 @@ The groups, each one apart so that a comparison can leave it out:
 - country: the last one GPS gave, none before the first;
 - pedals: gas and brake pressed at some moment of the last second, as carState says them;
 - speed: the car's own speed.
+- engaged: whether openpilot is engaged (selfdriveState.enabled), how long ago it last went off and what turned it off. A
+  driver who takes over where the limit said is wrong often brakes once and then lets the car slow down by itself, with no
+  pedal pressed: the pedals of the last second no longer show it, openpilot off still does.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -49,9 +52,10 @@ WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
 # that brain's own groups still give the same numbers. Without this a new group would leave the car with no vision limit at
 # all until a new brain is published. A change to what a group gives takes the hashes out of here.
 SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467",
-               "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244")
+               "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244",
+               "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7")
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
-               "pedals": 3, "speed": 2, "plate_wet": 1}
+               "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7}
 
 
 class SignInputs:
@@ -188,6 +192,53 @@ class PedalInputs:
     row[0] = now - self.gas_at <= PEDAL_SECONDS
     row[1] = now - self.brake_at <= PEDAL_SECONDS
     row[2] = self.known
+    return row
+
+
+class EngagedInputs:
+  """Whether openpilot is engaged (selfdriveState.enabled), how long ago it last went off and what turned it off: the brake or
+  the gas when it was down at that moment or within PEDAL_SECONDS of it, before or after (the car may see the pedal a little
+  after openpilot goes off), the brake first; else something else (a button, an alert). add_pedals() every carState,
+  add_enabled() every selfdriveState after them, then row() at the frame. The training gives it the changes of the logs in
+  their order, and a pedal let go counts as down until that moment, as it is on the car at 100 Hz."""
+
+  def __init__(self):
+    self.on = False
+    self.known = False
+    self.off_at: float | None = None
+    self.cause: str | None = None
+    self.down = {"brake": False, "gas": False}
+    self.down_at = {"brake": -math.inf, "gas": -math.inf}
+
+  def add_pedals(self, now: float, gas: bool, brake: bool) -> None:
+    for name, down in (("gas", bool(gas)), ("brake", bool(brake))):
+      if down or self.down[name]:
+        self.down_at[name] = now
+      self.down[name] = down
+    self._settle(now)
+
+  def add_enabled(self, now: float, enabled: bool) -> None:
+    if self.on and not enabled:
+      self.off_at = now
+    self.on, self.known = bool(enabled), True
+    self._settle(now)
+
+  def _settle(self, now: float) -> None:
+    """The cause of the last going off, while a pedal may still come."""
+    if self.off_at is None or now - self.off_at > PEDAL_SECONDS:
+      return
+    self.cause = next((name for name in ("brake", "gas")
+                       if self.down[name] or abs(self.down_at[name] - self.off_at) <= PEDAL_SECONDS), "other")
+
+  def row(self, now: float) -> np.ndarray:
+    """Engaged, gone off since the start, the age of the last going off as a sign's age, by the brake, by the gas, by
+    something else, known."""
+    row = np.zeros(INPUT_SIZES["engaged"], dtype=np.float32)
+    row[0] = self.on
+    if self.off_at is not None:
+      row[1:6] = (1.0, math.log1p(max(now - self.off_at, 0.0)) / SIGN_AGE_SCALE, self.cause == "brake", self.cause == "gas",
+                  self.cause == "other")
+    row[6] = self.known
     return row
 
 
