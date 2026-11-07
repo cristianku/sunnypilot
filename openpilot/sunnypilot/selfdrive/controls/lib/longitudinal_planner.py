@@ -5,6 +5,8 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 
+import numpy as np
+
 from openpilot.cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
@@ -34,6 +36,7 @@ class LongitudinalPlannerSP:
     self.accel_boost_sp = AccelBoostSP()
     self.openpilot_longitudinal = CP.openpilotLongitudinalControl
     self.engage_only_v_target = V_CRUISE_UNSET
+    self.cluster_offset = 0.
 
     self.output_v_target = 0.
     self.output_a_target = 0.
@@ -50,6 +53,14 @@ class LongitudinalPlannerSP:
       self.engage_only_v_target = max(v_ego, V_CRUISE_INITIAL * CV.KPH_TO_MS)
     return min(self.engage_only_v_target, V_CRUISE_MAX * CV.KPH_TO_MS)
 
+  def update_cluster_offset(self, CS) -> float:
+    # What the dashboard adds to the speed the car holds, read from its set speed: a set speed of 50 on the PSA's
+    # dashboard is 47 on the CAN, so a limit of 50 is held as 47 too, like a set speed made with the buttons.
+    # 0 where openpilot keeps the set speed itself (vCruiseCluster == vCruise); the last one is kept while unset.
+    if 0 < CS.vCruise < V_CRUISE_UNSET and 0 < CS.vCruiseCluster < V_CRUISE_UNSET:
+      self.cluster_offset = float(np.clip(CS.vCruiseCluster - CS.vCruise, 0., 10.)) * CV.KPH_TO_MS
+    return self.cluster_offset
+
   def update_targets(self, sm: messaging.SubMaster, v_ego: float, a_ego: float, v_cruise: float) -> tuple[float, float]:
     CS = sm['carState']
     v_cruise_cluster_kph = min(CS.vCruiseCluster, V_CRUISE_MAX)
@@ -64,7 +75,8 @@ class LongitudinalPlannerSP:
     # Speed Limit Assist
     has_speed_limit = self.resolver.speed_limit_valid or self.resolver.speed_limit_last_valid
     self.sla.update(long_enabled, long_override, v_ego, a_ego, v_cruise_cluster, self.resolver.speed_limit,
-                    self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp)
+                    self.resolver.speed_limit_final_last, has_speed_limit, self.resolver.distance, self.events_sp,
+                    self.update_cluster_offset(CS))
 
     # Smartspeed: the set speed only engages, it is never the target, the car drives to the limit, also above it. A
     # forced deceleration always wins.

@@ -81,6 +81,7 @@ class SpeedLimitAssist:
     self._has_speed_limit = False
     self._speed_limit = 0.
     self._speed_limit_final_last = 0.
+    self.cluster_offset = 0.
     self.speed_limit_prev = 0.
     self.speed_limit_final_last_conv = 0
     self.prev_speed_limit_final_last_conv = 0
@@ -139,10 +140,11 @@ class SpeedLimitAssist:
 
   def get_v_target_from_control(self) -> float:
     if self._has_speed_limit:
+      # The limit is a speed on the dashboard: the car holds it as it holds a set speed of the same number
       if self.automatic and self.is_enabled:
-        return self._speed_limit_final_last
+        return max(self._speed_limit_final_last - self.cluster_offset, 0.)
       if not self.automatic and self.is_active:
-        return self._speed_limit_final_last
+        return max(self._speed_limit_final_last - self.cluster_offset, 0.)
 
     # Fallback
     return V_CRUISE_UNSET
@@ -347,8 +349,10 @@ class SpeedLimitAssist:
           self.update_active_event(events_sp)
 
   def update(self, long_enabled: bool, long_override: bool, v_ego: float, a_ego: float, v_cruise_cluster: float, speed_limit: float,
-             speed_limit_final_last: float, has_speed_limit: bool, distance: float, events_sp: EventsSP) -> None:
+             speed_limit_final_last: float, has_speed_limit: bool, distance: float, events_sp: EventsSP,
+             cluster_offset: float = 0.) -> None:
     self.long_enabled = long_enabled
+    self.cluster_offset = cluster_offset
     self.v_ego = v_ego
     self.a_ego = a_ego
 

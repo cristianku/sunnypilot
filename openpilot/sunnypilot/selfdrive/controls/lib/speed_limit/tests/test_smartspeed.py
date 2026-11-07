@@ -128,6 +128,15 @@ class TestSmartspeed(OpenpilotTestCase):
     assert self.sla.state in ACTIVE_STATES
     assert self.sla.output_v_target == SPEED_LIMITS['city']
 
+  def test_limit_is_a_dashboard_speed(self):
+    # PSA: the dashboard shows the set speed + 3 km/h, so a limit of 50 is held at 47, as a set speed of 50 is
+    offset = 3. * CV.KPH_TO_MS
+    limit = 50. * CV.KPH_TO_MS
+    for _ in range(int(3. / DT_MDL)):
+      self.sla.update(True, False, limit, 0, SPEED_LIMITS['highway'], limit, limit, True, 0, self.events_sp, offset)
+    assert self.sla.state in ACTIVE_STATES
+    assert abs(self.sla.output_v_target - 47. * CV.KPH_TO_MS) < 1e-6
+
   def test_smartspeed_always_uses_the_network(self):
     self.params.put("SpeedLimitPolicy", int(Policy.map_data_priority), block=True)
     self.sla.frame = 0
