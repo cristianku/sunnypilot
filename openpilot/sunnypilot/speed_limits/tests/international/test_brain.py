@@ -1,6 +1,7 @@
 """The brain's reader on a fake network: what it sends in, what it says, what it refuses."""
 
 import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -213,3 +214,97 @@ def test_it_gets_openpilot_engaged_and_what_turned_it_off(vision):
   row = reader.network.calls[0][1][0][SIZE:]
   assert len(row) == brain_inputs.INPUT_SIZES['engaged']
   assert [row[0], row[1], row[3], row[4], row[5], row[6]] == [0, 1, 1, 0, 0, 1]
+
+
+def test_a_brain_of_the_first_contracts_steps_as_before(vision):
+  # No clock, picture or next output in its contract: the road-type picture once a second, the sign distance not sent
+  reader = brain.BrainReader(Network(), contract(), vision, 64, 32)
+  assert isinstance(reader.image, vision.RoadTypeInput) and not reader.schedule
+  reader.step(0.0, *frame(), None, None, None, None, 0.0)
+  reader.step(1.0, *frame(), None, None, None, None, 50.0)
+  first, second = (call[1] for call in reader.network.calls)
+  assert first.shape == second.shape == (1, SIZE) and np.array_equal(first, second)
+  assert (reader.speed_limit_ahead, reader.ahead_distance) == (0.0, 0.0)
+
+
+def test_the_published_brain_still_loads(vision):
+  published = Path(brain.__file__).parent / 'models' / 'brain.onnx.contract.json'
+  if not published.exists():
+    pytest.skip('no published brain in this checkout')
+  reader = brain.BrainReader(Network(), json.loads(published.read_text()), vision, 64, 32)
+  assert isinstance(reader.image, vision.RoadTypeInput) and not reader.schedule
+  assert reader.due(0.0)
+
+
+AHEAD_GROUPS = [*GROUPS, 'sign_distance']
+
+
+def four_hz(vision, network=None):
+  """A brain of 4 steps a second on the grid, with the brain's picture, the sign distance and the next limit."""
+  step = {'rate_hz': 4.0, 'groups': AHEAD_GROUPS, 'memory_gap_seconds': 5.0, 'clock': 'schedule', 'picture': 'brain'}
+  output = {'kph': [5, 10, 15, 20], 'metres_scale': 100.0}
+  return brain.BrainReader(network or Network(), contract(step=step, output=output), vision, 64, 32)
+
+
+def readings(reader, every, until):
+  """The readings at which the reader steps, of readings every `every` seconds from 0 to until."""
+  steps = []
+  for n in range(round(until / every)):
+    if reader.due(n * every):
+      reader.step(n * every, *frame(), None, None, None, None)
+      steps.append(round(n * every, 3))
+  return steps
+
+
+def test_a_brain_at_4_hz_steps_on_its_grid(vision):
+  # Readings at 5 a second: 4 of every 5 step, as the training's frames every 0.25 s
+  assert len(readings(four_hz(vision), 0.2, 10.0)) == 40
+  # Slower readings step at each one
+  assert readings(four_hz(vision), 0.3, 3.0) == [round(n * 0.3, 3) for n in range(10)]
+
+
+def test_a_brain_at_4_hz_starts_a_new_grid_after_a_pause(vision):
+  reader = four_hz(vision)
+  reader.step(0.0, *frame(), None, None, None, None)
+  assert reader.due(3.0)
+  reader.step(3.0, *frame(), None, None, None, None)
+  assert not reader.due(3.2) and reader.due(3.25)  # one step at 3.0, not the ones missed
+
+
+def test_a_brain_at_4_hz_sees_its_picture_and_the_sign_distance(vision):
+  reader = four_hz(vision)
+  for at, metres in ((0.0, 50.0), (0.25, 0.0), (0.5, 500.0)):
+    reader.step(at, *frame(), None, None, None, None, metres)
+  assert reader.network.calls[0][0].shape == (1, 3, vision.BRAIN_HEIGHT, vision.BRAIN_WIDTH)
+  assert [list(call[1][0, -2:]) for call in reader.network.calls] == [[0.5, 1.0], [0.0, 0.0], [2.0, 1.0]]
+
+
+class AheadNetwork(Network):
+  """Says 15 km/h, the next limit of class `ahead` (4: none) and the metres / 100 to it."""
+  def __init__(self, ahead, metres):
+    super().__init__()
+    self.ahead, self.metres = ahead, metres
+
+  def __call__(self, image, extra, hidden):
+    outputs = super().__call__(image, extra, hidden)
+    return outputs | {'next': np.eye(5, dtype=np.float32)[self.ahead][None], 'metres': np.array([[self.metres]], dtype=np.float32)}
+
+
+@pytest.mark.parametrize('ahead, metres, said', [
+  (1, 0.8, (10 / 3.6, 80.0)),
+  (0, -0.1, (5 / 3.6, 0.0)),  # never behind
+  (4, 0.8, (0.0, 0.0)),  # none ahead
+  (2, 0.8, (0.0, 0.0)),  # the limit it holds is no limit ahead
+])
+def test_it_says_the_next_limit_and_the_metres_to_it(vision, ahead, metres, said):
+  reader = four_hz(vision, AheadNetwork(ahead, metres))
+  reader.step(0.0, *frame(), None, None, None, None, 0.0)
+  assert reader.speed_limit == pytest.approx(15 / 3.6)
+  assert (reader.speed_limit_ahead, reader.ahead_distance) == pytest.approx(said)
+
+
+def test_the_sign_distance_row():
+  assert list(brain_inputs.sign_distance_row(0.0)) == [0.0, 0.0]
+  assert list(brain_inputs.sign_distance_row(-3.0)) == [0.0, 0.0]
+  assert brain_inputs.sign_distance_row(30.0) == pytest.approx([0.3, 1.0])
+  assert brain_inputs.sign_distance_row(900.0) == pytest.approx([brain_inputs.SIGN_METRES_MAX / brain_inputs.SIGN_METRES_SCALE, 1.0])

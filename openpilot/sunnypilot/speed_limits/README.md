@@ -67,15 +67,32 @@ until then, and the Smartspeed mode sets 6 by itself.
 ## The brain
 
 When the release has a `brain` (`speed_limits.json`, `brain.onnx`), it is the vision limit: Smartspeed is the one
-choice in sunnylink and the resolver does not change. `brain.BrainReader` steps once a second with the frame, what `brain_inputs.py`
-makes of the signs read, the car ahead (`radarState`), the local hour and the country from GPS, gas, brake and the car's speed
-(`carState`), and whether openpilot is engaged, how long ago it went off and whether the brake, the gas or
-something else turned it off (`selfdriveState`). The speed it says is
+choice in sunnylink and the resolver does not change. `brain.BrainReader` steps with the frame, what `brain_inputs.py`
+makes of the signs read, the metres to the sign ahead (`vision.SignDistance`), the car ahead (`radarState`), the local hour
+and the country from GPS, gas, brake and the car's speed (`carState`), and whether openpilot is engaged, how long ago it went
+off and whether the brake, the gas or something else turned it off (`selfdriveState`). The speed it says is
 `speedLimit`, with `speedLimitReason` "brain". The rules of `SpeedLimitMemory`, the road-type network and `LimitAhead` do not run
 then; SignNet, the classifier and the distance to a sign do.
 
-The contract holds the sha256 of the `brain_inputs.py` it was trained with: the car refuses another one, and speedvisiond then
-sends nothing, so there is no limit. Without a `brain` the old limit runs as before.
+The contract's `step` says how it steps, and a contract without these keys is the first brains' (s2):
+
+- `rate_hz` and `clock`: `"last"` (default) steps once a period has passed since the last step, 1 Hz for the first brains;
+  `"schedule"` steps on a fixed grid of the rate, at the first reading due, as the training's frames are taken every
+  0.25 s of the video at 4 Hz. speedvisiond reads about 4-5 frames a second, so a 4 Hz brain steps at nearly every reading;
+  after a pause the grid starts again at the next reading.
+- `picture`: `"road_type"` (default) is `vision.RoadTypeInput`, the road-type network's 256 x 144 RGB, made from the whole
+  frame in RGB; `"brain"` is `vision.BrainInput`, the same size, the luma and chroma scaled first and only then turned to RGB,
+  about 5 ms instead of 23 ms on a 1344 x 760 frame, so that it can run at every reading. The server makes the training
+  pictures with the same class.
+- `groups`: a brain trained with `sign_distance` gets the metres to the sign ahead, clipped at 200 m, 0 for none.
+
+A brain trained with the outputs `next` (the classes of `kph` and a last one for none) and `metres` also says the next limit
+and the metres to it (`metres` x `output.metres_scale`). They are `speedLimitAhead` and `speedLimitAheadDistance`, counted
+down by the metres driven since the step, and none when it says none or the limit it holds. The resolver takes the limit
+ahead as it takes the map's: only a lower one, within the distance to adapt to it.
+
+The contract holds the sha256 of the `brain_inputs.py` it was trained with (or one in `SAME_GROUPS`): the car refuses another
+one, and speedvisiond then sends nothing, so there is no limit. Without a `brain` the old limit runs as before.
 
 ## A number with hours
 

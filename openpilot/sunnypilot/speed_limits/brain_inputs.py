@@ -30,6 +30,9 @@ The groups, each one apart so that a comparison can leave it out:
 - engaged: whether openpilot is engaged (selfdriveState.enabled), how long ago it last went off and what turned it off. A
   driver who takes over where the limit said is wrong often brakes once and then lets the car slow down by itself, with no
   pedal pressed: the pedals of the last second no longer show it, openpilot off still does.
+- sign_distance: the metres to the round sign ahead as vision.SignDistance measures them from its box and the car's speed
+  (the same class on the car and on the server), known; nothing once it is passed. With it the brain can say where its
+  next limit starts.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -42,6 +45,8 @@ SIGN_KPH_SCALE = 130.0
 SIGN_AGE_SCALE = math.log1p(3600.0)
 LEAD_METRES_SCALE = 100.0
 LEAD_METRES_MAX = 200.0
+SIGN_METRES_SCALE = 100.0
+SIGN_METRES_MAX = 200.0
 SPEED_MAX = 60.0  # m/s
 SPEED_SCALE = 30.0
 PEDAL_SECONDS = 1.0
@@ -53,9 +58,10 @@ WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
 # all until a new brain is published. A change to what a group gives takes the hashes out of here.
 SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467",
                "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244",
-               "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7")
+               "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7",
+               "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0")
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
-               "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7}
+               "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2}
 
 
 class SignInputs:
@@ -161,6 +167,14 @@ def lead_row(metres: float | None, kph: float | None) -> np.ndarray:
   row = np.zeros(INPUT_SIZES["lead"], dtype=np.float32)
   if metres is not None and kph is not None:
     row[:] = min(metres, LEAD_METRES_MAX) / LEAD_METRES_SCALE, kph / SIGN_KPH_SCALE, 1.0
+  return row
+
+
+def sign_distance_row(metres: float) -> np.ndarray:
+  """vision.SignDistance's metres to the sign ahead, clipped, and known; 0 (none, or passed) is not known."""
+  row = np.zeros(INPUT_SIZES["sign_distance"], dtype=np.float32)
+  if metres > 0:
+    row[:] = min(metres, SIGN_METRES_MAX) / SIGN_METRES_SCALE, 1.0
   return row
 
 

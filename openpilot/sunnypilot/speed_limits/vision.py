@@ -107,6 +107,8 @@ CARRIAGEWAY_LAG = 5.0
 # memory carried from step to step; its answer counts once the same class comes ROAD_TYPE_DEBOUNCE steps in a row.
 ROAD_TYPE_WIDTH = 256
 ROAD_TYPE_HEIGHT = 144
+BRAIN_WIDTH = 256
+BRAIN_HEIGHT = 144
 ROAD_TYPE_PERIOD = 1.0
 ROAD_TYPE_DEBOUNCE = 3
 ROAD_TYPE_RESET_SECONDS = 5.0  # longer without a step: its memory starts again from zeros
@@ -205,6 +207,9 @@ TRACK_SHRINK = 0.8
 LIMIT_AHEAD_SLACK = 5.0
 TRACK_SIGHTINGS = 50  # the last 10 s of sightings at most (stopped in front of a sign)
 ODOMETER_MAX_STEP = 0.1  # seconds: a longer gap between two carState messages adds nothing
+# The road camera's focal length (pixels) by the size of its frames, for the server, which has no openpilot: speedvisiond
+# takes it from DEVICE_CAMERAS (a test checks that they agree).
+FOCAL_LENGTHS = {(1344, 760): 1141.5, (1928, 1208): 2648.0, (1164, 874): 910.0}
 
 # The settings the release may change (speed_limits.json "settings", set on the training server's portal, Models › On
 # the car): its key, the constant here, its bounds. A key not known, not a number or out of bounds keeps the default.
@@ -424,6 +429,31 @@ class RoadTypeInput:
     if self.columns is not None:
       planes = self.columns(planes)
     pixels = resample_rows(planes, *self.rows)[None].astype(np.float32)
+    return np.divide(pixels, 255.0, out=pixels)
+
+
+class BrainInput:
+  """The brain's image for frames of one size: the luma and the chroma planes scaled first (PIL's bilinear weights, rows
+  then columns), and only then RGB at BRAIN_WIDTH x BRAIN_HEIGHT as yuv_to_rgb makes it, float 0..1 (1, 3, BRAIN_HEIGHT,
+  BRAIN_WIDTH). Far cheaper than RoadTypeInput, which turns the whole frame to RGB first, so that the brain can step at
+  every reading. The server makes the training pictures with this same class from the decoded NV12 frames."""
+  def __init__(self, width: int, height: int):
+    self.luma_rows = resample_coefficients(height, BRAIN_HEIGHT)
+    self.luma_columns = ColumnResampler(width, BRAIN_WIDTH)
+    self.chroma_rows = resample_coefficients(height // 2, BRAIN_HEIGHT // 2)
+    self.chroma_columns = ColumnResampler(width // 2, BRAIN_WIDTH // 2)
+
+  def planes(self, y: np.ndarray, uv: np.ndarray) -> np.ndarray:
+    """The image as uint8 planes (3, BRAIN_HEIGHT, BRAIN_WIDTH)."""
+    luma = self.luma_columns(resample_rows(y[None], *self.luma_rows))[0]
+    chroma = resample_rows(uv.reshape(uv.shape[0], -1, 2).transpose(2, 0, 1), *self.chroma_rows)
+    chroma = self.chroma_columns(chroma)
+    interleaved = np.empty((BRAIN_HEIGHT // 2, BRAIN_WIDTH), dtype=np.uint8)
+    interleaved[:, 0::2], interleaved[:, 1::2] = chroma
+    return yuv_to_rgb(luma, interleaved, 0, BRAIN_HEIGHT, 0, BRAIN_WIDTH)
+
+  def __call__(self, y: np.ndarray, uv: np.ndarray) -> np.ndarray:
+    pixels = self.planes(y, uv)[None].astype(np.float32)
     return np.divide(pixels, 255.0, out=pixels)
 
 

@@ -6,9 +6,12 @@ See the LICENSE.md file in the root directory for more details.
 
 VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE READS THE MAP (liveMapDataSP).
 
-The brain: the network with memory that says the speed to hold, once a second. It is the limit of the vision side when the
-release has one: no rule of vision.SpeedLimitMemory and no road-type network decides then. What the reader read goes in as
-an input (brain_inputs), the number that comes out is published as it is.
+The brain: the network with memory that says the speed to hold, and a brain trained with them the next limit and the metres
+to it. It is the limit of the vision side when the release has one: no rule of vision.SpeedLimitMemory and no road-type
+network decides then. What the reader read goes in as an input (brain_inputs), the numbers that come out are published as
+they are. The contract's step says how: its rate, its clock ("last": a step once a period has passed since the last one,
+the first brains, at 1 Hz; "schedule": steps on a fixed grid of that rate, at the reading that comes first, as the
+training's frames are) and its picture ("road_type": vision.RoadTypeInput; "brain": vision.BrainInput).
 """
 import hashlib
 import math
@@ -20,8 +23,10 @@ from openpilot.sunnypilot.speed_limits import brain_inputs
 
 
 class BrainReader:
-  """The network step by step: add_signs() on every frame read, step() when due. The picture is the road-type network's,
-  bit for bit the frames of the training. speed_limit is the speed said (m/s), held between the steps, 0 before the first.
+  """The network step by step: add_signs() on every frame read, step() when due. The picture is the one of its contract,
+  bit for bit the frames of the training. speed_limit is the speed said (m/s), held between the steps, 0 before the first;
+  speed_limit_ahead the next limit (m/s) and ahead_distance the metres to it at the last step, both 0 when the brain says
+  none, says the limit it holds, or has no such output.
   Raises ValueError on a network that was trained with another brain_inputs.py or asks for what the car does not give."""
   def __init__(self, network, contract: dict, vision, width: int, height: int):
     if contract["inputs_sha256"] not in (hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest(), *brain_inputs.SAME_GROUPS):
@@ -32,8 +37,11 @@ class BrainReader:
     self.network = network
     self.kph = contract["output"]["kph"]
     self.period = 1.0 / contract["step"]["rate_hz"]
+    self.schedule = {"last": False, "schedule": True}[contract["step"].get("clock", "last")]
     self.memory_gap = contract["step"]["memory_gap_seconds"]
-    self.image = vision.RoadTypeInput(width, height)
+    pictures = {"road_type": vision.RoadTypeInput, "brain": vision.BrainInput}
+    self.image = pictures[contract["step"].get("picture", "road_type")](width, height)
+    self.metres_scale = contract["output"].get("metres_scale", 0.0)
     self.signs = brain_inputs.SignInputs(vision)
     self.class_plate = vision.class_plate
     self.plates = {plate for plate, trained in (("time", contract["step"].get("plates", False)),
@@ -41,7 +49,10 @@ class BrainReader:
     self.class_hours = vision.class_hours if contract["step"].get("hours", False) else lambda name: None
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
+    self.speed_limit_ahead = 0.0
+    self.ahead_distance = 0.0
     self.last_step = -math.inf
+    self.next_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
     self.engaged = brain_inputs.EngagedInputs()
 
@@ -69,22 +80,37 @@ class BrainReader:
     self.engaged.add_enabled(now, enabled)
 
   def due(self, now: float) -> bool:
+    if self.schedule:
+      return now >= self.next_step
     return now - self.last_step >= self.period
 
   def step(self, now: float, y: np.ndarray, uv: np.ndarray, lead: tuple[float, float] | None, unix_seconds: float | None,
-           country: str | None, v_ego: float | None) -> float:
+           country: str | None, v_ego: float | None, sign_distance: float = 0.0) -> float:
     """lead: metres and km/h of the car ahead, None without one; unix_seconds: the GPS clock now, None before a fix; country:
-    the last one GPS gave, None before the first; v_ego: the car's speed (m/s), None before the first carState."""
+    the last one GPS gave, None before the first; v_ego: the car's speed (m/s), None before the first carState;
+    sign_distance: vision.SignDistance's metres to the sign ahead, 0 without one."""
     if now - self.last_step > self.memory_gap:
       self.hidden = np.zeros_like(self.hidden)
     self.last_step = now
+    # the next step on the grid of the rate (readings slower than it step at each one); after a pause, a new grid from here
+    self.next_step += self.period
+    if self.next_step < now:
+      self.next_step = now + self.period
     metres, kph = lead if lead is not None else (None, None)
     rows = {"signs": self.signs.features(now), "plate": self.signs.plate_row(), "plate_hours": self.signs.plate_hours_row(),
             "hour": brain_inputs.hour_row(brain_inputs.local_hour(unix_seconds, country)),
             "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
             "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego),
-            "plate_wet": self.signs.plate_wet_row(), "engaged": self.engaged.row(now)}
+            "plate_wet": self.signs.plate_wet_row(), "engaged": self.engaged.row(now),
+            "sign_distance": brain_inputs.sign_distance_row(sign_distance)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
+    self.speed_limit_ahead = self.ahead_distance = 0.0
+    if "next" in outputs:  # the last class of next is none
+      index = int(np.argmax(outputs["next"]))
+      ahead = self.kph[index] / 3.6 if index < len(self.kph) else 0.0
+      if ahead > 0 and ahead != self.speed_limit:
+        self.speed_limit_ahead = ahead
+        self.ahead_distance = max(0.0, float(outputs["metres"].reshape(-1)[0]) * self.metres_scale)
     return self.speed_limit

@@ -123,9 +123,12 @@ def test_daemon_keeps_the_last_gps_country_when_the_fix_is_lost(candidate, visio
 
 
 class FakeBrain:
-  """A BrainReader saying 77 km/h from its first step, with what the daemon gave it."""
+  """A BrainReader saying 77 km/h from its first step, and the limit ahead of `ahead` (km/h, metres), with what the
+  daemon gave it."""
+  ahead = (0.0, 0.0)
+
   def __init__(self, network, contract, vision, width, height):
-    self.speed_limit = 0.0
+    self.speed_limit = self.speed_limit_ahead = self.ahead_distance = 0.0
     self.seen, self.steps = [], []
     self.signs = NS(read_at=None)
     FakeBrain.last = self
@@ -137,9 +140,10 @@ class FakeBrain:
   def due(self, now):
     return not self.steps
 
-  def step(self, now, y, uv, lead, unix_seconds, country, v_ego):
+  def step(self, now, y, uv, lead, unix_seconds, country, v_ego, sign_distance):
     self.steps.append((lead, unix_seconds, country))
     self.speed_limit = 77 / 3.6
+    self.speed_limit_ahead, self.ahead_distance = FakeBrain.ahead[0] / 3.6, FakeBrain.ahead[1]
 
 
 def test_daemon_with_a_brain_publishes_what_it_says(candidate, vision, country):
@@ -152,6 +156,15 @@ def test_daemon_with_a_brain_publishes_what_it_says(candidate, vision, country):
   lead, unix_seconds, _ = FakeBrain.last.steps[0]
   assert lead == (30.0, 36.0)
   assert unix_seconds >= 1_770_000_000
+  assert not hasattr(out, 'speedLimitAhead')  # no limit ahead said: none published
+
+
+def test_daemon_publishes_the_limit_ahead_the_brain_says(candidate, vision, country, monkeypatch):
+  monkeypatch.setattr(FakeBrain, 'ahead', (50.0, 120.0))
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', reader=FakeBrain, brain_contract={})
+  assert out.speedLimit == pytest.approx(77 / 3.6)
+  assert out.speedLimitAhead == pytest.approx(50 / 3.6)
+  assert out.speedLimitAheadDistance == pytest.approx(120.0)  # no carState: no metres driven since the step
 
 
 def test_daemon_goes_idle_when_the_brain_does_not_load(candidate, vision, country):

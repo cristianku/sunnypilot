@@ -581,6 +581,27 @@ def test_road_type_input_is_the_resized_frame():
   assert np.array_equal(vision.RoadTypeInput(width, height)(y, uv)[0], expected.astype(np.float32) / 255.0)
 
 
+@pytest.mark.parametrize("width, height", [(1344, 760), (1928, 1208), (1164, 874)])
+def test_brain_input_is_the_scaled_frame(width, height):
+  # Luma and chroma scaled before RGB: on a smooth picture within rounding of the whole frame turned to RGB and scaled
+  rows, columns = np.mgrid[0:height, 0:width]
+  y, uv = nv12(60 + 120 * columns // width + 40 * rows // height, np.full((height // 2, width // 2), 100),
+               110 + 40 * columns[::2, ::2] // width)
+  image = vision.BrainInput(width, height)
+  planes = image.planes(y, uv)
+  assert planes.dtype == np.uint8 and planes.shape == (3, vision.BRAIN_HEIGHT, vision.BRAIN_WIDTH)
+  whole = vision.resize(vision.yuv_to_rgb(y, uv, 0, height, 0, width), vision.BRAIN_WIDTH, vision.BRAIN_HEIGHT)
+  difference = np.abs(planes.astype(int) - whole)
+  assert difference.max() <= 3 and difference.mean() < 0.2
+  assert np.array_equal(image(y, uv)[0], planes.astype(np.float32) / 255.0)
+
+
+def test_focal_lengths_are_the_cameras():
+  from openpilot.common.transformations.camera import DEVICE_CAMERAS
+  cameras = {(c.narrow_road.width, c.narrow_road.height): c.narrow_road.focal_length for c in DEVICE_CAMERAS.values()}
+  assert vision.FOCAL_LENGTHS == cameras
+
+
 
 def test_memory_a_30_zone_seen_keeps_the_car_at_30():
   memory = vision.SpeedLimitMemory("CH")
