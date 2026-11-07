@@ -130,7 +130,7 @@ def test_zero_revokes_previous_target_through_resolver_and_sla(chain, policy):
 
 
 @pytest.mark.parametrize('policy', [5, 6])
-def test_map_fallback_and_display_units(chain, policy):
+def test_no_map_fallback_and_display_units(chain, policy):
   r, s, sm, data, params, _ = chain
   params.values['SpeedLimitPolicy'] = policy
   r.policy = policy
@@ -138,9 +138,8 @@ def test_map_fallback_and_display_units(chain, policy):
   params.values['IsMetric'] = False
   assert step(chain, 13.4112, 30) == pytest.approx(13.4112)
   assert r.speed_limit == pytest.approx(13.4112)
-  target = step(chain, 0, 30)
-  assert target == (30 if policy == 5 else 255)
-  assert r.source == (2 if policy == 5 else 0)  # schema's map / none
+  assert step(chain, 0, 30) == 255  # Smartspeed never takes the map, a stored 5 neither
+  assert r.source == 0  # schema's none
 
 
 def test_stale_vision_does_not_retain_target(chain):
@@ -149,11 +148,11 @@ def test_stale_vision_does_not_retain_target(chain):
   assert step(chain, 22.352) == 255
 
 
-def test_mixed_policy_with_stale_map_gps_revokes_previous_target(chain):
+def test_map_data_vision_becomes_smartspeed(chain):
   r, s, sm, data, params, _ = chain
   params.values['SpeedLimitPolicy'] = r.policy = 5
   assert step(chain, 22.352, 30) == pytest.approx(22.352)
-  sm.recv_time['gpsLocationExternal'] -= 100  # an expired fix, not a proposed GPS-policy value
+  assert params.values['SpeedLimitPolicy'] == 6
   assert step(chain, 0, 30) == 255
   assert not r.speed_limit_last_valid and not s._has_speed_limit
 
@@ -186,7 +185,7 @@ def test_memory_country_end_and_sla_chain(chain, vision, policy):
   assert step(chain, m.speed_limit, 30) == pytest.approx(11.176)
   m.update(2, [0])
   m.update(2.2, [0])
-  assert step(chain, m.speed_limit, 30) == (30 if policy == 5 else 255)
+  assert step(chain, m.speed_limit, 30) == 255
   m.set_country('GB')
   m.update(3, [50])
   m.update(3.2, [50])
@@ -244,4 +243,4 @@ def test_smartspeed_moves_a_source_without_the_network_to_it(chain):
   r, s, sm, data, params, _ = chain
   params.values['SpeedLimitPolicy'] = r.policy = 3
   assert step(chain, 22.352) == pytest.approx(22.352)
-  assert params.values['SpeedLimitPolicy'] == 5
+  assert params.values['SpeedLimitPolicy'] == 6

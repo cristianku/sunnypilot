@@ -58,13 +58,15 @@ re-evaluates memory/implicit rules without converting an old number again. No ne
 timeout has been validated or introduced. These state choices are code-tested,
 not device-validated.
 
-For Vision Only and Map Data + Vision, a missing current allowed solution clears
+For Smartspeed (Speed Limit Source 6), a missing current allowed solution clears
 the resolver's previous limit as well: the planner also checks the previous-limit
-validity flag. Mixed mode can use a current map fallback; Vision Only cannot.
+validity flag. There is no map fallback. Map Data + Vision (5) is no longer offered:
+a stored 5 becomes 6 (`helpers.set_speed_limit_assist_availability`) and is read as 6
+until then, and the Smartspeed mode sets 6 by itself.
 
 ## The brain
 
-When the release has a `brain` (`speed_limits.json`, `brain.onnx`), it is the vision limit: "Map Data + Vision" stays the one
+When the release has a `brain` (`speed_limits.json`, `brain.onnx`), it is the vision limit: Smartspeed is the one
 choice in sunnylink and the resolver does not change. `brain.BrainReader` steps once a second with the frame, what `brain_inputs.py`
 makes of the signs read, the car ahead (`radarState`), the local hour and the country from GPS, gas, brake and the car's speed
 (`carState`), and whether openpilot is engaged, how long ago it went off and whether the brake, the gas or
@@ -73,9 +75,7 @@ something else turned it off (`selfdriveState`). The speed it says is
 then; SignNet, the classifier and the distance to a sign do.
 
 The contract holds the sha256 of the `brain_inputs.py` it was trained with: the car refuses another one, and speedvisiond then
-sends nothing, so the resolver falls to the map. Without a `brain` the old limit runs as before.
-
-The brain always says a number, so with "Map Data + Vision" the map is not used while it runs.
+sends nothing, so there is no limit. Without a `brain` the old limit runs as before.
 
 ## A number with hours
 

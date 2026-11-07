@@ -95,7 +95,7 @@ def is_stock_model(started, params, CP: car.CarParams) -> bool:
   return bool(get_active_model_runner(params, not started) == custom.ModelManagerSP.Runner.stock)
 
 def speed_vision(started: bool, params: Params, CP: car.CarParams) -> bool:
-  """The speed-limits networks' reading is shown (Show Vision Speed Limit) or used (Map Data + Vision, Vision Only)."""
+  """The speed-limits networks' reading is shown (Show Vision Speed Limit) or used (Smartspeed, and a stored 5 read as it)."""
   return params.get_bool("SpeedLimitVisionDisplay") or params.get("SpeedLimitPolicy", return_default=True) in (5, 6)
 
 def mapd_ready(started: bool, params: Params, CP: car.CarParams) -> bool:

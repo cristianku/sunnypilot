@@ -54,7 +54,7 @@ class SpeedLimitResolver:
       Policy.car_state_priority: [SpeedLimitSource.car, SpeedLimitSource.map],
       Policy.map_data_priority: [SpeedLimitSource.map, SpeedLimitSource.car],
       Policy.combined: [SpeedLimitSource.car, SpeedLimitSource.map],
-      Policy.map_data_vision: [SpeedLimitSource.vision, SpeedLimitSource.map],
+      Policy.map_data_vision: [SpeedLimitSource.vision],  # a stored 5 not moved to vision_only yet: the same, no map
       Policy.vision_only: [SpeedLimitSource.vision],
     }
     self.source = SpeedLimitSource.none
@@ -84,7 +84,6 @@ class SpeedLimitResolver:
       self.speed_limit_final_last = self.speed_limit_final
     elif Policy(self.policy) in (Policy.vision_only, Policy.map_data_vision):
       # Planner/SLA also use the last valid solution. A zero current vision limit alone cannot revoke that target.
-      # Mixed policy already selected a fresh map fallback above, if available.
       self.speed_limit_last = 0.
       self.speed_limit_final_last = 0.
 
@@ -124,8 +123,8 @@ class SpeedLimitResolver:
 
   def _get_from_vision(self, sm: messaging.SubMaster) -> None:
     """The limit of the speed-limits neural network (speedVisionSP): 0 when it is not sure or speedvisiond is not
-    running (a stale message is never used), and its limit ahead like the map's. Only the policies Map Data + Vision
-    and Vision Only take it."""
+    running (a stale message is never used), and its limit ahead like the map's. Only Smartspeed (Vision Only, and a
+    stored Map Data + Vision) takes it."""
     self._reset_limit_sources(SpeedLimitSource.vision)
     try:
       alive = sm.alive['speedVisionSP']

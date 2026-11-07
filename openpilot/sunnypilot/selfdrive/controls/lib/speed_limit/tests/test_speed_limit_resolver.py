@@ -191,15 +191,14 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
 
   @parameterized.expand([
     # policy, car, vision, map, expected limit, expected source
+    # A stored Map Data + Vision (no longer offered) is read as Smartspeed: the network's limit, never the map.
     (Policy.map_data_vision, 0., 22., 25., 22., SpeedLimitSource.vision),
     (Policy.map_data_vision, 0., 22., 0., 22., SpeedLimitSource.vision),
-    # The network is not sure (0): the map.
-    (Policy.map_data_vision, 0., 0., 25., 25., SpeedLimitSource.map),
+    (Policy.map_data_vision, 0., 0., 25., 0., SpeedLimitSource.none),
     (Policy.map_data_vision, 0., 0., 0., 0., SpeedLimitSource.none),
-    # Map Data + Vision does not use the car's own limit.
-    (Policy.map_data_vision, 30., 0., 25., 25., SpeedLimitSource.map),
+    (Policy.map_data_vision, 30., 0., 25., 0., SpeedLimitSource.none),
     (Policy.map_data_vision, 30., 22., 25., 22., SpeedLimitSource.vision),
-    # Vision Only: the network's limit, never the map or the car, and no limit when the network has none.
+    # Smartspeed (Vision Only): the network's limit, never the map or the car, and no limit when the network has none.
     (Policy.vision_only, 0., 22., 25., 22., SpeedLimitSource.vision),
     (Policy.vision_only, 30., 0., 25., 0., SpeedLimitSource.none),
     (Policy.vision_only, 0., 0., 0., 0., SpeedLimitSource.none),
@@ -235,12 +234,12 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     self.assertAlmostEqual(resolver.distance, distance, delta=0.1)
 
   def test_stale_vision_ignored(self, resolver_class, mocker):
-    # speedvisiond stopped: its last message is never used, the map takes over.
+    # speedvisiond stopped: its last message is never used, and Smartspeed has no map to take over.
     resolver = resolver_class()
-    resolver.policy = Policy.map_data_vision
+    resolver.policy = Policy.vision_only
     resolver.update(20., setup_vision_sm_mock(mocker, 0., 22., 25., vision_alive=False))
-    assert resolver.speed_limit == 25.
-    assert resolver.source == SpeedLimitSource.map
+    assert resolver.speed_limit == 0.
+    assert resolver.source == SpeedLimitSource.none
 
   def test_vision_not_subscribed(self, resolver_class, mocker):
     # A SubMaster without speedVisionSP (an older planner, a debug tool): no vision limit, no error.

@@ -117,7 +117,7 @@ CARRIAGEWAYS = ("motorway", "expressway")
 # after the last sign, it also lowers a town's general limit held from a sign (its gate sign missed, a 50 read on the
 # street before): the car must not speed up to 50 inside it. A higher number (60, 80) holds: the network can be wrong.
 ZONE_LIMIT = 30.0
-# zone30 is said only this sure (its probability), else town: with Map Data + Vision the resolver takes vision first,
+# zone30 is said only this sure (its probability), else town: with Smartspeed the resolver takes only vision,
 # and a wrong 30 on a 50 street is worse than a zone missed. 0.9 for the first network with the class; 0.99 the aim.
 ZONE_CONFIDENCE = 0.9
 SIGN_AGE_MAX = 120.0

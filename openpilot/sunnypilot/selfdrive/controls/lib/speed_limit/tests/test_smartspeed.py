@@ -141,7 +141,15 @@ class TestSmartspeed(OpenpilotTestCase):
     self.params.put("SpeedLimitPolicy", int(Policy.map_data_priority), block=True)
     self.sla.frame = 0
     self.sla.update_params()
-    assert self.params.get("SpeedLimitPolicy", return_default=True) == Policy.map_data_vision
+    assert self.params.get("SpeedLimitPolicy", return_default=True) == Policy.vision_only
+
+  def test_map_data_vision_becomes_smartspeed(self):
+    # Map Data + Vision is no longer offered: a stored 5 becomes Smartspeed (6), in any mode
+    self.params.put("SpeedLimitMode", int(Mode.assist), block=True)
+    self.params.put("SpeedLimitPolicy", int(Policy.map_data_vision), block=True)
+    self.sla.frame = 0
+    self.sla.update_params()
+    assert self.params.get("SpeedLimitPolicy", return_default=True) == Policy.vision_only
 
   def test_transition_disabled_to_pending_no_speed_limit_not_max_initial_set_speed(self):
     for _ in range(int(3. / DT_MDL)):

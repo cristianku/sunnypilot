@@ -905,7 +905,7 @@
               "key": "SpeedLimitPolicy",
               "widget": "multiple_button",
               "title": "Speed Limit Source",
-              "description": "With Smartspeed the source is Map Data + Vision by itself.",
+              "description": "Smartspeed: only the speed-limits neural network's limit from the road camera, never the map. The Smartspeed mode uses it by itself.",
               "options": [
                 {
                   "value": 0,
@@ -928,12 +928,8 @@
                   "label": "Combined"
                 },
                 {
-                  "value": 5,
-                  "label": "Map Data + Vision"
-                },
-                {
                   "value": 6,
-                  "label": "Vision Only"
+                  "label": "Smartspeed"
                 }
               ],
               "visibility": [
@@ -949,7 +945,7 @@
               "key": "SpeedLimitVisionDisplay",
               "widget": "toggle",
               "title": "Show Vision Reading",
-              "description": "Show what the network reads from the road camera, in a fuchsia square on the right of the driving screen. Information only, it does not change the speed. A dark square with a dash means no reading. Always shown with Smartspeed, and when Speed Limit Source is Map Data + Vision or Vision Only.",
+              "description": "Show what the network reads from the road camera, in a fuchsia square on the right of the driving screen. Information only, it does not change the speed. A dark square with a dash means no reading. Always shown with the Smartspeed mode, and when Speed Limit Source is Smartspeed.",
               "visibility": [
                 {
                   "type": "capability",

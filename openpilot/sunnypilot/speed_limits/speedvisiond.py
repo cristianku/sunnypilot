@@ -13,7 +13,7 @@ the acceleration lane, or once the car is on the carriageway (vision.SpeedLimitM
 whole frame with the car's speed, steering, blinkers and yaw (carState, deviceMotion): where no sign gives the limit
 the scene does (a garage 10, a car park in the open 20, out of it the street's general limit, a town 50). IT NEVER
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
-Limit is on or Speed Limit Source is Map Data + Vision or Vision Only. For the logs, each message also says what the limit says
+Limit is on or Speed Limit Source is Smartspeed. For the logs, each message also says what the limit says
 (speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
 The networks read only the number on a sign; it becomes m/s in the unit of the country (vision.sign_unit: mph in the UK,
 the US and the places that follow them, km/h elsewhere): the last country GPS confirmed when the release has borders

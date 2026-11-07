@@ -14,8 +14,8 @@ class Policy(IntEnumBase):
   car_state_priority = 2
   map_data_priority = 3
   combined = 4
-  map_data_vision = 5  # the speed-limits neural network's limit (speedVisionSP) when it has one, else the map
-  vision_only = 6  # only the speed-limits neural network's limit (speedVisionSP): no limit when it has none
+  map_data_vision = 5  # no longer offered: a stored 5 becomes vision_only (helpers), and is read as it meanwhile
+  vision_only = 6  # Smartspeed: only the speed-limits brain's limit (speedVisionSP), never the map: no limit when it has none
 
 
 class OffsetType(IntEnumBase):

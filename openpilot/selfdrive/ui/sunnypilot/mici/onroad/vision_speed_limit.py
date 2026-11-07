@@ -55,8 +55,8 @@ def vision_box(rect: rl.Rectangle, beside_final: bool = False) -> rl.Rectangle:
 
 
 class VisionSpeedLimit(Widget):
-  """The speed limit read by the speed-limits neural network (speedVisionSP), drawn on the right of the screen, when Show Vision Speed Limit is on or Speed Limit Source is Map Data +
-  Vision or Vision Only: a fuchsia square with an eye and the limit in white, always visible, over an alert too (the
+  """The speed limit read by the speed-limits neural network (speedVisionSP), drawn on the right of the screen, when Show Vision Speed Limit is on or Speed Limit Source is
+  Smartspeed: a fuchsia square with an eye and the limit in white, always visible, over an alert too (the
   Dashcam Mode alert stays for the whole drive). The drawing does not change the speed. A dark square with a dash means
   no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read, even one
   that gives the limit already shown. Under it the kind of road the network sees. While the network sees a round sign

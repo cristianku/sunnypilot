@@ -191,8 +191,8 @@ class UIStateSP:
     self.speed_limit_auto_speed = self.speed_limit_mode == Mode.smartspeed
     # Information, Warning and Assist show the resolver's limit on the comma 4.
     self.speed_limit_final_display = self.speed_limit_mode in (Mode.information, Mode.warning, Mode.assist)
-    # Map Data + Vision and Vision Only use the network's limit, so they show it too: one choice in Speed Limit Source
-    # is enough.
+    # Smartspeed as Speed Limit Source (and a stored Map Data + Vision, read as it) uses the network's limit, so it shows
+    # it too: one choice in Speed Limit Source is enough.
     self.speed_limit_vision_display = (self.params.get_bool("SpeedLimitVisionDisplay") or
                                        self.params.get("SpeedLimitPolicy", return_default=True) in
                                        (Policy.map_data_vision, Policy.vision_only))
