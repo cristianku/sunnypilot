@@ -17,8 +17,10 @@ from openpilot.system.ui.widgets import Widget
 SIZE = 72
 MARGIN = 12
 # Between the squares, and over the road type: at its biggest the vision square's pulse (PULSE_GROW * SIZE / 2, 6.5 px
-# a side, its border 2 px more) only slides under what is drawn after it, the road type.
+# a side, its border 2 px more) only slides under what is drawn after it, the reading square under it.
 GAP = 8
+# The sign reading's square (sign_reading.py), under the vision square and smaller: the road type goes under it.
+READING_SIZE = 56
 ROUNDNESS = 0.3
 SEGMENTS = 10
 BORDER = 3
@@ -34,8 +36,8 @@ PULSE_GROW = 0.18
 # The small text on top of a square, where the eye would be: the sign's distance here, the final limit's source.
 SOURCE_FONT_SIZE = 18
 SOURCE_TOP = 7
-# Under the vision square, small and fuchsia, what the road-type network sees (a car park, a town...), kept inside the
-# screen ("expressway" is wider than the square), clear of the square's pulse.
+# Under the reading square, small and fuchsia, what the road-type network sees (a car park, a town...), kept inside the
+# screen ("expressway" is wider than the square), above the GPU icon.
 ROAD_FONT_SIZE = 20
 ROAD_GAP = GAP
 
@@ -54,14 +56,21 @@ def vision_box(rect: rl.Rectangle, beside_final: bool = False) -> rl.Rectangle:
   return rl.Rectangle(rect.x + rect.width - MARGIN - SIZE - beside, rect.y + MARGIN, SIZE, SIZE)
 
 
+def reading_box(rect: rl.Rectangle, beside_final: bool = False) -> rl.Rectangle:
+  """The sign reading's square, centred under the vision square: with the road type under it, still above the GPU
+  icon."""
+  box = vision_box(rect, beside_final)
+  return rl.Rectangle(box.x + (SIZE - READING_SIZE) / 2, box.y + SIZE + GAP, READING_SIZE, READING_SIZE)
+
+
 class VisionSpeedLimit(Widget):
   """The speed limit read by the speed-limits neural network (speedVisionSP), drawn on the right of the screen, when Show Vision Speed Limit is on or Speed Limit Source is
   Smartspeed: a fuchsia square with an eye and the limit in white, always visible, over an alert too (the
   Dashcam Mode alert stays for the whole drive). The drawing does not change the speed. A dark square with a dash means
   no reading: the network is not sure, or speedvisiond is not running. It pulses each time a sign is read, even one
-  that gives the limit already shown. Under it the kind of road the network sees. While the network sees a round sign
-  or a motorway sign or its end ahead, the distance to it replaces the eye. Only the camera's reading is drawn here,
-  as speedvisiond works from the camera and the car alone."""
+  that gives the limit already shown. Under it the last sign read (sign_reading.py), and under that the kind of road
+  the network sees. While the network sees a round sign or a motorway sign or its end ahead, the distance to it replaces
+  the eye. Only the camera's reading is drawn here, as speedvisiond works from the camera and the car alone."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
@@ -89,6 +98,7 @@ class VisionSpeedLimit(Widget):
       return
 
     box = vision_box(rect, ui_state.speed_limit_final_display)
+    reading = reading_box(rect, ui_state.speed_limit_final_display)
     has_limit = round(self._speed_limit) > 0
     since = rl.get_time() - self._pulse_at
     pulse = math.sin(math.pi * since / PULSE_SECONDS) if 0 <= since < PULSE_SECONDS else 0.
@@ -121,5 +131,5 @@ class VisionSpeedLimit(Widget):
     if self._road_type:
       size = measure_text_cached(self._font, self._road_type, ROAD_FONT_SIZE)
       road_x = min(box.x + (SIZE - size.x) / 2, rect.x + rect.width - MARGIN - size.x)
-      rl.draw_text_ex(self._font, self._road_type, rl.Vector2(road_x, box.y + SIZE + ROAD_GAP), ROAD_FONT_SIZE, 0,
-                      FUCHSIA_LIGHT)
+      rl.draw_text_ex(self._font, self._road_type, rl.Vector2(road_x, reading.y + READING_SIZE + ROAD_GAP), ROAD_FONT_SIZE,
+                      0, FUCHSIA_LIGHT)

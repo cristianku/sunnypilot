@@ -14,7 +14,8 @@ whole frame with the car's speed, steering, blinkers and yaw (carState, deviceMo
 the scene does (a garage 10, a car park in the open 20, out of it the street's general limit, a town 50). IT NEVER
 READS THE MAP: MAP AND VISION ARE TWO SEPARATE SOURCES, WEIGHED ONLY BY THE RESOLVER. It runs when Show Vision Speed
 Limit is on or Speed Limit Source is Smartspeed. For the logs, each message also says what the limit says
-(speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*).
+(speedLimitState), the rule that set the limit held (speedLimitReason) and the last sign read, taken or not (rawSign*);
+the screen's reading square shows that last sign, and whether it is in view now (rawSignSeen).
 The networks read only the number on a sign; it becomes m/s in the unit of the country (vision.sign_unit: mph in the UK,
 the US and the places that follow them, km/h elsewhere): the last country GPS confirmed when the release has borders
 and a country policy, else the one of the settings.
@@ -201,6 +202,7 @@ def main() -> None:
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes, full_planes(full, client.frame_id))
+    raw = vision.raw_reading(signs)
     msg = messaging.new_message("speedVisionSP", valid=True)
     if reader is not None:
       reader.add_signs(now, signs)
@@ -210,7 +212,6 @@ def main() -> None:
         unix = gps_clock[0] + now - gps_clock[1] if gps_clock is not None else None
         reader.step(now, y, uv, lead, unix, gps_country, v_ego, sign_distance)
         step_odometer = distance.odometer
-      raw = vision.raw_reading(signs)
       if raw is not None:
         memory.note_raw(raw)
       msg.speedVisionSP.speedLimit = float(reader.speed_limit)
@@ -239,6 +240,7 @@ def main() -> None:
     msg.speedVisionSP.modelName = files.name
     msg.speedVisionSP.signDistance = sign_distance
     msg.speedVisionSP.signSize = distance.side
+    msg.speedVisionSP.rawSignSeen = raw is not None
     pm.send("speedVisionSP", msg)
 
 

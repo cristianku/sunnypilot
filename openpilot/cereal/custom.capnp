@@ -538,6 +538,9 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   # new limit.
   speedLimitAhead @15 :Float32;
   speedLimitAheadDistance @16 :Float32;
+  # A raw reading in this frame (the rawSign* fields are its): the sign it is from is in view. The screen's reading
+  # square shows rawSign* with its border red while it is, grey once the sign is passed and the last reading stays.
+  rawSignSeen @17 :Bool;
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {
