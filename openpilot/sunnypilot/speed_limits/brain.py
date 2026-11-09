@@ -55,6 +55,7 @@ class BrainReader:
     self.next_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
     self.engaged = brain_inputs.EngagedInputs()
+    self.motion = brain_inputs.MotionInputs()
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
     """A frame's signs as vision.read_signs gives them. A plate only to a brain trained with that kind of plate, and their
@@ -74,6 +75,14 @@ class BrainReader:
     """Every carState."""
     self.pedals.add(now, gas, brake)
     self.engaged.add_pedals(now, gas, brake)
+
+  def add_car_state(self, now: float, steering_deg: float, left: bool, right: bool, yaw_rate: float) -> None:
+    """Every carState: the steering wheel, the turn signals and the car's yaw rate."""
+    self.motion.add_car_state(now, steering_deg, left, right, yaw_rate)
+
+  def add_device_motion(self, now: float, z: float, valid: bool) -> None:
+    """Every deviceMotion: angularVelocityDevice.z and its valid flag."""
+    self.motion.add_device_motion(now, z, valid)
 
   def add_enabled(self, now: float, enabled: bool) -> None:
     """Every selfdriveState, after the carStates that came before it."""
@@ -102,7 +111,7 @@ class BrainReader:
             "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
             "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego),
             "plate_wet": self.signs.plate_wet_row(), "engaged": self.engaged.row(now),
-            "sign_distance": brain_inputs.sign_distance_row(sign_distance)}
+            "sign_distance": brain_inputs.sign_distance_row(sign_distance), "motion": self.motion.row(now)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6

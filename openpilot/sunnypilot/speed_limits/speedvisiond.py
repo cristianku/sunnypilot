@@ -176,12 +176,15 @@ def main() -> None:
       motion.add_car_state(now, state.steeringAngleDeg, state.leftBlinker, state.rightBlinker, state.yawRate)
       if reader is not None:
         reader.add_pedals(now, state.gasPressed, state.brakePressed)
+        reader.add_car_state(now, state.steeringAngleDeg, state.leftBlinker, state.rightBlinker, state.yawRate)
     for event in messaging.drain_sock(car["selfdriveState"]):
       if reader is not None:
         reader.add_enabled(now, event.selfdriveState.enabled)
     for event in messaging.drain_sock(car["deviceMotion"]):
       yaw = event.deviceMotion.angularVelocityDevice
       motion.add_device_motion(now, yaw.z, yaw.valid)
+      if reader is not None:
+        reader.add_device_motion(now, yaw.z, yaw.valid)
     for event in messaging.drain_sock(radar):
       one = event.radarState.leadOne
       lead = (one.dRel, one.vLead * 3.6) if one.present else None

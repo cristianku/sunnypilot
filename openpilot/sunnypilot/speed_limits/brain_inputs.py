@@ -33,6 +33,9 @@ The groups, each one apart so that a comparison can leave it out:
 - sign_distance: the metres to the round sign ahead as vision.SignDistance measures them from its box and the car's speed
   (the same class on the car and on the server), known; nothing once it is passed. With it the brain can say where its
   next limit starts.
+- motion: the car's own turn signals, steering wheel and yaw (MotionInputs): a blinker on in the last BLINKER_SECONDS and
+  how long ago it was last on, left and right; the steering angle; the yaw rate (deviceMotion, the car's yawRate when the
+  device gives none); each known. A turn signal before an exit or a junction says the limit is about to change.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -50,6 +53,12 @@ SIGN_METRES_MAX = 200.0
 SPEED_MAX = 60.0  # m/s
 SPEED_SCALE = 30.0
 PEDAL_SECONDS = 1.0
+BLINKER_SECONDS = 1.0  # a blinker lamp flashes: on at some moment of the last second is on
+BLINKER_AGE_MAX = 60.0  # s: longer ago, or never, is 1
+STEER_SCALE, STEER_MAX = 180.0, 4.0  # degrees of the steering wheel, clipped at +-STEER_MAX after the scale
+YAW_SCALE, YAW_MAX = 30.0, 3.0  # deg/s, left positive
+MOTION_SECONDS = 1.0  # a signal not heard for longer is unknown
+CAR_YAW_MIN = 1e-4  # rad/s: a car whose yawRate stays 0 has no sensor behind it
 MEMORY_GAP_SECONDS = 5.0  # longer without a frame: its memory starts again from zeros
 # The hours from UTC in winter, of the countries with the EU's summer time. Arithmetic on UTC: a comma may have no time zones.
 WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
@@ -59,9 +68,11 @@ WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
 SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467",
                "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244",
                "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7",
-               "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0")
+               "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0",
+               "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d")
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
-               "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2}
+               "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
+               "motion": 8}
 
 
 class SignInputs:
@@ -253,6 +264,55 @@ class EngagedInputs:
       row[1:6] = (1.0, math.log1p(max(now - self.off_at, 0.0)) / SIGN_AGE_SCALE, self.cause == "brake", self.cause == "gas",
                   self.cause == "other")
     row[6] = self.known
+    return row
+
+
+class MotionInputs:
+  """The car's turn signals, steering wheel and yaw: add_car_state() every carState, add_device_motion() every deviceMotion,
+  then row() at the frame. The training gives it the changes of the logs in their order: a blinker that goes off counts as on
+  until that moment, as it is on the car at 100 Hz, and a value is given again at each frame while the log holds it."""
+
+  def __init__(self):
+    self.left, self.right = False, False
+    self.left_at, self.right_at = -math.inf, -math.inf
+    self.steer, self.car_yaw, self.car_at = 0.0, 0.0, -math.inf
+    self.yaw, self.yaw_at = 0.0, -math.inf
+
+  def add_car_state(self, now: float, steering_deg: float, left: bool, right: bool, yaw_rate: float) -> None:
+    """carState: steeringAngleDeg (left positive), leftBlinker, rightBlinker, yawRate (rad/s, left positive; 0 on cars
+    without the sensor)."""
+    if left or self.left:
+      self.left_at = now
+    if right or self.right:
+      self.right_at = now
+    self.left, self.right = bool(left), bool(right)
+    self.steer, self.car_yaw, self.car_at = float(steering_deg), float(yaw_rate), now
+
+  def add_device_motion(self, now: float, z: float, valid: bool) -> None:
+    """deviceMotion.angularVelocityDevice.z (rad/s): the device's z points down, so the yaw (left positive) is -z."""
+    if valid:
+      self.yaw, self.yaw_at = -math.degrees(z), now
+
+  def row(self, now: float) -> np.ndarray:
+    """Left on in the last BLINKER_SECONDS, right the same, the age of the last left / right on over BLINKER_AGE_MAX (1 for
+    longer or never), the steering angle / STEER_SCALE, the yaw rate / YAW_SCALE, yaw known, car known."""
+    row = np.zeros(INPUT_SIZES["motion"], dtype=np.float32)
+    if now - self.car_at <= MOTION_SECONDS:
+      row[0] = now - self.left_at <= BLINKER_SECONDS
+      row[1] = now - self.right_at <= BLINKER_SECONDS
+      row[2] = min(max(now - self.left_at, 0.0), BLINKER_AGE_MAX) / BLINKER_AGE_MAX
+      row[3] = min(max(now - self.right_at, 0.0), BLINKER_AGE_MAX) / BLINKER_AGE_MAX
+      row[4] = np.clip(self.steer / STEER_SCALE, -STEER_MAX, STEER_MAX)
+      row[7] = 1.0
+    else:
+      row[2:4] = 1.0
+    if now - self.yaw_at <= MOTION_SECONDS:
+      yaw = self.yaw
+    elif now - self.car_at <= MOTION_SECONDS and abs(self.car_yaw) > CAR_YAW_MIN:
+      yaw = math.degrees(self.car_yaw)
+    else:
+      return row
+    row[5], row[6] = np.clip(yaw / YAW_SCALE, -YAW_MAX, YAW_MAX), 1.0
     return row
 
 
