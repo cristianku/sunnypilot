@@ -40,11 +40,11 @@ class HudRendererSP(HudRenderer):
   def _render(self, rect: rl.Rectangle) -> None:
     super()._render(rect)
     # At the top right, clear of the steering wheel and of the GPU icon in the bottom right corner, all under the blind
-    # spot warning. Smartspeed: the vision square with the last sign read and the road type under it, SMART left of it,
-    # in the corner. Information, Warning and Assist: the final limit in the corner, the vision square left of it when
-    # it is on. The reading after the vision square, whose pulse slides under it.
-    self.vision_speed_limit.render(rect)
+    # spot warning. Smartspeed: the vision square in the corner with SMART left of it, the sign reader under it and the
+    # road type left of that. Information, Warning and Assist: the final limit in the corner, the vision square left of
+    # it when it is on. The reading before the vision square, so its pulse slides under it.
     self.sign_reading.render(rect)
+    self.vision_speed_limit.render(rect)
     self.final_speed_limit.render(rect)
     if self._auto_speed:
       self.auto_speed.render(rect)
