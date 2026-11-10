@@ -29,6 +29,7 @@ CLASSIFIER_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1
 CLASSIFIER_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
 MIN_CROP_SIDE = 2
 MIN_CONFIDENCE = 0.7
+OTHER_ROAD = "other_road"  # a sign the applicability network gave to another road (applicability.OTHER_ROAD): not taken
 
 # A reading becomes the limit when it is in CONFIRM_FRAMES frames within CONFIRM_SECONDS; it stays until another does.
 CONFIRM_FRAMES = 2
@@ -264,17 +265,22 @@ GREEN_V = _yuv_term(-6660, 128 * 8)
 BLUE_U = _yuv_term(16525, 128 * 8)
 
 
-def resample_coefficients(in_size: int, out_size: int) -> tuple[np.ndarray, np.ndarray]:
+def resample_coefficients(in_size: int, out_size: int, start: float = 0.0,
+                          end: float | None = None) -> tuple[np.ndarray, np.ndarray]:
   """PIL's bilinear resampling of in_size pixels to out_size (Resample.c precompute_coeffs and
   normalize_coeffs_8bpc): for each output pixel the input pixels it reads (out_size, taps) and their weights in
-  fixed point. Taps of weight 0 are left out where they can be (they add nothing), the others have weight 0."""
-  scale = in_size / out_size
+  fixed point. Taps of weight 0 are left out where they can be (they add nothing), the others have weight 0.
+  start, end: only the part start..end of the in_size pixels, as Image.resize with a box; its taps may read the pixels
+  just outside it. PIL takes the box as float32 and subtracts in float32: so here."""
+  start, end = np.float32(start), np.float32(in_size if end is None else end)
+  scale = float(end - start) / out_size
+  start = float(start)
   filterscale = max(scale, 1.0)
   support = filterscale  # the bilinear filter's support is 1
   ss = 1.0 / filterscale
   first, weights = [], []
   for xx in range(out_size):
-    center = (xx + 0.5) * scale
+    center = start + (xx + 0.5) * scale
     xmin = max(int(center - support + 0.5), 0)
     xmax = min(int(center + support + 0.5), in_size) - xmin
     k = [max(0.0, 1.0 - abs((x + xmin - center + 0.5) * ss)) for x in range(xmax)]
@@ -702,7 +708,8 @@ class SpeedLimitMemory:
 
   For the logs, and nothing else: the rule that set the limit held (limit_reason, LIMIT_REASONS), what the limit says
   (limit_state, LIMIT_STATES) and the last raw reading given to update (raw_reading) with whether the limit was set
-  from it in its frame (raw_class, raw_speed, raw_confidence, raw_taken); fill_log writes them in speedVisionSP."""
+  from it in its frame (raw_class, raw_speed, raw_confidence, raw_taken) and the road the applicability network gave
+  it (raw_road); fill_log writes them in speedVisionSP."""
   def __init__(self, country: str | None = DEFAULT_COUNTRY):
     self.speed_limit = 0.0
     self.country = country
@@ -742,6 +749,7 @@ class SpeedLimitMemory:
     self.raw_value = 0.0
     self.raw_unit = "unknown"
     self.raw_country = ""
+    self.raw_road = ""  # the applicability network's road of the last raw reading, "" when it did not rule it
 
   def set_country(self, country: str | None) -> None:
     """Only a confirmed new country invalidates memory. GPS loss blocks observations but holds m/s.
@@ -822,7 +830,7 @@ class SpeedLimitMemory:
     normalized = [speed for value in readings if (speed := sign_mps(value, sign_unit(self.country))) is not None]
     limit = self._update(now, normalized, signs, road_type, v_ego)
     if raw is not None:
-      self.raw_taken = self._taken == self.note_raw(raw) and self._taken is not None
+      self.raw_taken = self._taken == self.note_raw(raw) and self._taken is not None and self.raw_road != OTHER_ROAD
     return limit
 
   def note_raw(self, raw: dict) -> float | str | None:
@@ -833,19 +841,22 @@ class SpeedLimitMemory:
     self.raw_class, self.raw_confidence = raw["class"], float(raw["confidence"])
     self.raw_value, self.raw_unit, self.raw_country = speed or 0.0, unit, self.country or ""
     self.raw_speed = (speed or 0.0) if unit == "km/h" else physical * 3.6 if physical is not None else 0.0
+    self.raw_road = raw.get("road", "")
     return ROAD_SIGNS.get(raw["class"]) if speed is None else physical
 
   def update_frame(self, now: float, signs: list[dict], road_type: str | None = None,
-                   v_ego: float | None = None) -> float:
+                   v_ego: float | None = None, seen: list[dict] | None = None) -> float:
     """update with a frame's signs as read_signs gives them, as speedvisiond: the ones read sure enough (MIN_CONFIDENCE)
-    are its readings and signs, the surest of all its raw reading."""
+    are its readings and signs, the surest of all its raw reading. seen: all the signs of the frame when signs are only
+    the ones taken (applicability.taken), for the raw reading: the logs show a sign of another road too."""
     sure = [sign for sign in signs if sign["confidence"] >= MIN_CONFIDENCE]
     return self.update(now, [sign["speed"] for sign in sure if sign["speed"] is not None],
-                       [sign["class"] for sign in sure], road_type=road_type, v_ego=v_ego, raw=raw_reading(signs))
+                       [sign["class"] for sign in sure], road_type=road_type, v_ego=v_ego,
+                       raw=raw_reading(signs if seen is None else seen))
 
   def fill_log(self, message) -> None:
     """speedVisionSP's fields for the logs (cereal/custom.capnp) on its message: what the limit says, the rule that set
-    it, the last raw reading and whether the limit was set from it."""
+    it, the last raw reading, whether the limit was set from it and the road the applicability network gave it."""
     message.speedLimitState = self.limit_state
     message.speedLimitReason = self.limit_reason
     message.rawSignClass = self.raw_class
@@ -855,6 +866,7 @@ class SpeedLimitMemory:
     message.rawSignValue = self.raw_value
     message.rawSignUnit = self.raw_unit
     message.rawSignCountry = self.raw_country
+    message.rawSignRoad = self.raw_road
 
   def _update(self, now: float, readings: list[float], signs: list[str] | tuple[str, ...], road_type: str | None,
               v_ego: float | None) -> float:

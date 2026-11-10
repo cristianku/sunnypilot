@@ -23,7 +23,7 @@ except ImportError:  # no opendbc (cereal's import path): the file alone
 FIELDS = {"speedLimit": 0, "modelName": 1, "signRead": 2, "roadType": 3, "speedLimitState": 4, "speedLimitReason": 5,
           "rawSignClass": 6, "rawSignSpeed": 7, "rawSignConfidence": 8, "rawSignTaken": 9, "signDistance": 10,
           "signSize": 11, "rawSignValue": 12, "rawSignUnit": 13, "rawSignCountry": 14,
-          "speedLimitAhead": 15, "speedLimitAheadDistance": 16, "rawSignSeen": 17}
+          "speedLimitAhead": 15, "speedLimitAheadDistance": 16, "rawSignSeen": 17, "rawSignRoad": 18}
 # speedVisionSP before the fields for the logs: an old log's message.
 OLD = """@0xe0b6b2b0c0a1d2f3;
 struct SpeedVisionSP {
@@ -83,6 +83,31 @@ def test_the_memory_fills_the_fields(custom):
   assert logged(custom, memory) == ("limit", "sign", "maximum_speed:80", 80, 0.95, True)
   assert memory.update_frame(1.4, []) == pytest.approx(80 / 3.6)  # no sign: the last read and whether it was taken are held
   assert logged(custom, memory) == ("limit", "sign", "maximum_speed:80", 80, 0.95, True)
+
+
+def test_a_sign_of_another_road_shows_and_is_not_taken(custom):
+  # speedvisiond gives the memory the signs taken (applicability.taken) and all of them for the logs (seen).
+  memory = vision.SpeedLimitMemory("CH")
+  side, ours = dict(read("maximum_speed:30", 0.99), road="other_road"), dict(read("maximum_speed:80", 0.9), road="own_road")
+  for now in (0.0, 0.2):
+    limit = memory.update_frame(now, [ours], seen=[side, ours])
+  assert limit == pytest.approx(80 / 3.6)
+  assert logged(custom, memory) == ("limit", "sign", "maximum_speed:30", 30, 0.99, False)  # the surest read, not taken
+  builder = custom.SpeedVisionSP.new_message()
+  memory.fill_log(builder)
+  assert builder.rawSignRoad == "other_road"
+  # The same number on our road and on the side road: the one of the side road is still not taken.
+  memory = vision.SpeedLimitMemory("CH")
+  side80 = dict(read("maximum_speed:80", 0.99), road="other_road")
+  for now in (0.0, 0.2):
+    limit = memory.update_frame(now, [ours], seen=[side80, ours])
+  assert limit == pytest.approx(80 / 3.6) and not memory.raw_taken and memory.raw_road == "other_road"
+  # Unresolved: taken, as a sign not ruled.
+  memory = vision.SpeedLimitMemory("CH")
+  unsure = dict(read("maximum_speed:60", 0.95), road="unresolved")
+  for now in (0.0, 0.2):
+    limit = memory.update_frame(now, [unsure], seen=[unsure])
+  assert limit == pytest.approx(60 / 3.6) and memory.raw_taken and memory.raw_road == "unresolved"
 
 
 def test_a_number_with_hours_is_its_number_to_the_memory(custom):

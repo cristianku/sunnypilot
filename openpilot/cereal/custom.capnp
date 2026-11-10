@@ -541,6 +541,10 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   # A raw reading in this frame (the rawSign* fields are its): the sign it is from is in view. The screen's reading
   # square shows rawSign* with its border red while it is, grey once the sign is passed and the last reading stays.
   rawSignSeen @17 :Bool;
+  # Whom the applicability network (speed_limits/applicability.py) gave the sign of rawSign*: "own_road", "other_road"
+  # (a side street, an exit, the lane beside: not taken, rawSignTaken false), "unresolved" (it abstains: taken); ""
+  # when it did not rule it (a release without it, a family it did not learn) or in an old log.
+  rawSignRoad @18 :Text;
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

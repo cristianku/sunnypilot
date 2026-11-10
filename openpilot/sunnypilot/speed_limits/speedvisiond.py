@@ -29,6 +29,10 @@ at every reading for a brain at 4 Hz), the speed it says is speedLimit, and a br
 limit and the metres to it, speedLimitAhead and speedLimitAheadDistance, counted down by the metres driven between its
 steps. Neither the rules of the memory, nor the road-type network, nor vision.LimitAhead are run. The distance to a sign
 stays on the screen; signRead pulses on a number confirmed.
+When the release has the applicability network (applicability.Applicability), it rules right after the classifier the
+signs of the families it learnt: a sign it gives to another road (a side street, an exit, the lane beside) is not
+taken, neither by the memory, nor by the brain, nor by the distance; the reading square still shows it, with
+rawSignTaken false and rawSignRoad other_road. A release without it takes every sign, as before.
 With the Developer switch Read Signs at Full Resolution the classifier's crops come from the full stream of camerad, the
 same frame before the scaling; SignNet, the road-type network and the distance stay on the low frame.
 """
@@ -45,7 +49,7 @@ from openpilot.common.params import Params
 from openpilot.common.gps import get_gps_location_service
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
-from openpilot.sunnypilot.speed_limits import brain, runner, vision
+from openpilot.sunnypilot.speed_limits import applicability, brain, runner, vision
 from openpilot.sunnypilot.speed_limits.country import CountryResolver, OfflineBorders, GpsFix
 
 PERIOD = 0.2  # seconds between the frames read
@@ -141,6 +145,14 @@ def main() -> None:
     except Exception:
       cloudlog.exception("speedvisiond: the road type network did not compile or load, the signs only")
 
+  ruler = None
+  if files.decider is not None:
+    try:
+      ruler = applicability.Applicability(runner.StepNetwork(runner.compile_network(files.decider)), files.decider_contract,
+                                          vision, client.width, client.height)
+    except Exception:
+      cloudlog.exception("speedvisiond: the applicability network did not compile or load, every sign is taken")
+
   pm = messaging.PubMaster(["speedVisionSP"])
   signnet_input = vision.SignNetInput(client.width, client.height)
   # GPS selects only a country and sign unit. No map speed/road/junction data enters vision.
@@ -205,7 +217,12 @@ def main() -> None:
     data = np.frombuffer(buf.data, dtype=np.uint8)  # buf.data is a memoryview of the camera's buffer
     y, uv = vision.nv12_planes(data, buf.width, buf.height, buf.stride, buf.uv_offset)
     signs = vision.read_signs(y, uv, signnet_input, finder, classifier, files.classes, full_planes(full, client.frame_id))
-    raw = vision.raw_reading(signs)
+    raw = vision.raw_reading(signs)  # of all the signs: the reading square shows a sign of another road too
+    seen = signs
+    if ruler is not None:
+      # Right after the classifier, while the GPU is still free of the driving model.
+      ruler.rule(y, uv, signs, v_ego)
+      signs = applicability.taken(signs)
     msg = messaging.new_message("speedVisionSP", valid=True)
     if reader is not None:
       reader.add_signs(now, signs)
@@ -217,6 +234,8 @@ def main() -> None:
         step_odometer = distance.odometer
       if raw is not None:
         memory.note_raw(raw)
+        # Given to the brain: read sure enough and not of another road.
+        memory.raw_taken = raw["confidence"] >= vision.MIN_CONFIDENCE and memory.raw_road != vision.OTHER_ROAD
       msg.speedVisionSP.speedLimit = float(reader.speed_limit)
       if reader.speed_limit_ahead > 0:
         msg.speedVisionSP.speedLimitAhead = float(reader.speed_limit_ahead)
@@ -231,7 +250,7 @@ def main() -> None:
         road_types.step(now, y, uv, v_ego, memory.road_sign_age(now), motion.features(now),
                          memory.board_age(now))
       road_type = road_types.road_type if road_types is not None else None
-      speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego)
+      speed_limit = memory.update_frame(now, signs, road_type=road_type, v_ego=v_ego, seen=seen)
       sign_distance = distance.update(now, signs, memory.road)
       speed_limit = limit_ahead.update(speed_limit, memory.limit_reason, sign_distance, distance.sign_class, distance.odometer)
       msg.speedVisionSP.speedLimit = float(speed_limit)

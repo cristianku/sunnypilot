@@ -11,8 +11,9 @@ POLICY = {'gps_max_age_s': 2, 'gps_max_accuracy_m': 20, 'border_margin_m': 100, 
 
 
 def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=float('inf'), signs_from=0.0, reader=None,
-               brain_contract=None, sleep=lambda _: None):
-  """The messages speedvisiond sends until 1.3 s: GPS in GB (with a fix until gps_fix_until), a 30 sign from signs_from."""
+               brain_contract=None, sleep=lambda _: None, ruler=None):
+  """The messages speedvisiond sends until 1.3 s: GPS in GB (with a fix until gps_fix_until), a 30 sign from signs_from;
+  ruler: the applicability network's class (applicability.Applicability), None for a release without it."""
   class Stop(Exception):
     pass
 
@@ -66,7 +67,8 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
       return False
 
   files = NS(settings=settings, name='synthetic', finder='finder', classifier='classifier', road_type=None,
-             brain='brain' if reader is not None else None, brain_contract=brain_contract, classes=['maximum_speed:30'])
+             brain='brain' if reader is not None else None, brain_contract=brain_contract, classes=['maximum_speed:30'],
+             decider='decider' if ruler is not None else None, decider_contract={})
   signs = [dict(box=[0, 0, 10, 10], confidence=0.99, speed=30.0, **{'class': 'maximum_speed:30'})]
   v = NS(**vars(vision))
   v.SignNetInput = lambda *args: None
@@ -87,6 +89,8 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
     'vision': v,
     'runner': NS(networks=lambda: files, Network=lambda _: None, compile_network=lambda p: p, StepNetwork=lambda p: None),
     'brain': NS(BrainReader=reader),
+    'applicability': NS(**{**execute(candidate / 'openpilot/sunnypilot/speed_limits/applicability.py', {'np': np}),
+                           'Applicability': ruler}),
     'CountryResolver': country.CountryResolver,
     'OfflineBorders': NS(load=lambda: b),
     'GpsFix': country.GpsFix,
@@ -165,6 +169,48 @@ def test_daemon_publishes_the_limit_ahead_the_brain_says(candidate, vision, coun
   assert out.speedLimit == pytest.approx(77 / 3.6)
   assert out.speedLimitAhead == pytest.approx(50 / 3.6)
   assert out.speedLimitAheadDistance == pytest.approx(120.0)  # no carState: no metres driven since the step
+
+
+class SideRoad:
+  """An applicability network giving every sign it rules to another road, with what the daemon gave it."""
+  def __init__(self, network, contract, vision, width, height):
+    self.v_egos = []
+    SideRoad.last = self
+
+  def rule(self, y, uv, signs, v_ego):
+    self.v_egos.append(v_ego)
+    for sign in signs:
+      sign['road'], sign['road_confidence'] = 'other_road', 0.9
+    return signs
+
+
+def test_daemon_does_not_take_a_sign_of_another_road(candidate, vision, country):
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', ruler=SideRoad)
+  assert out.speedLimit == 0  # the 30 of the side road is never the limit
+  assert (out.rawSignClass, out.rawSignRoad, out.rawSignTaken) == ('maximum_speed:30', 'other_road', False)  # but it shows
+  assert out.rawSignSeen
+  assert out.signDistance == 0
+
+
+def test_daemon_gives_the_brain_only_the_signs_of_our_road(candidate, vision, country):
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', reader=FakeBrain, brain_contract={},
+                   ruler=SideRoad)
+  assert all(seen == [] for seen in FakeBrain.last.seen)
+  assert (out.rawSignClass, out.rawSignRoad, out.rawSignTaken) == ('maximum_speed:30', 'other_road', False)
+
+
+def test_daemon_with_a_brain_says_the_sign_was_given_to_it(candidate, vision, country):
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', reader=FakeBrain, brain_contract={})
+  assert (out.rawSignRoad, out.rawSignTaken) == ('', True)
+
+
+def test_daemon_takes_every_sign_when_the_applicability_network_does_not_load(candidate, vision, country):
+  def refuse(*args):
+    raise ValueError("not the car's applicability network")
+
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', ruler=refuse)
+  assert out.speedLimit == pytest.approx(13.4112)
+  assert (out.rawSignRoad, out.rawSignTaken) == ('', True)
 
 
 def test_daemon_goes_idle_when_the_brain_does_not_load(candidate, vision, country):
