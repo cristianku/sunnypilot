@@ -45,6 +45,11 @@ PULSE_SECONDS = 0.6
 PULSE_GROW = 0.18
 # Red, the ring of a round sign, while the sign is in view.
 RED = rl.Color(235, 60, 60, 235)
+# A road sign read (MWY, EXP, TOWN) never takes the square's place: it goes in a small box under it, as wide, until
+# the next sign is read, while the square keeps the last limit read.
+ROAD_GAP = 4
+ROAD_HEIGHT = 24
+ROAD_FONT_SIZE = 18
 
 
 def reading_text(sign_class: str, value: float) -> tuple[str, bool]:
@@ -60,6 +65,17 @@ def reading_text(sign_class: str, value: float) -> tuple[str, bool]:
   return (str(round(value)), False) if value > 0 else ("?", False)
 
 
+def square_and_road(sign_class: str, value: float, confidence: float,
+                    square: tuple[str, bool, str]) -> tuple[tuple[str, bool, str], tuple[str, bool]]:
+  """What the square and the box under it show after a raw reading: the square (its text, crossed out, the confidence)
+  the last limit read, END or a number, kept as it was (square) when the reading is a road sign, which goes under it
+  instead; ("", False) under it after any other reading."""
+  text, crossed = reading_text(sign_class, value)
+  if sign_class in ROAD_SIGNS:
+    return square, (text, crossed)
+  return (text, crossed, f"{round(confidence * 100)}%" if text else ""), ("", False)
+
+
 def distance_text(metres: float, metric: bool) -> str:
   """The distance to the sign ahead (speedVisionSP.signDistance), in m, or in ft without metric units; "" without a
   sign ahead."""
@@ -69,11 +85,13 @@ def distance_text(metres: float, metric: bool) -> str:
 
 class SignReading(Widget):
   """The sign reader's square, under the vision square and as big, for the driver to see the sign reader work apart
-  from the speed the vision square shows: the last sign the classifier read (speedVisionSP.rawSign*) as it was read (its
-  number as written, END, a road sign's short name, crossed out at its end), with the classifier's confidence on top,
+  from the speed the vision square shows: the last limit the classifier read (speedVisionSP.rawSign*) as it was read
+  (its number as written, END), with the classifier's confidence on top,
   sure enough or not, whatever the memory or the brain made of it, and at the bottom the distance to the sign ahead
   (signDistance, from its size on the camera and the metres driven) while there is one. Its border is red while that
-  sign is in view (rawSignSeen) and grey once it is passed, as the reading stays until another sign is read. It pulses
+  sign is in view (rawSignSeen) and grey once it is passed, as the reading stays until another sign is read. A road sign
+  read (its short name, crossed out at its end) goes in a small box under the square, red too while in view, until the
+  next sign is read, and leaves the limit in the square (square_and_road). It pulses
   on every sign read (signRead, the same limit again too), with soundd's beep. A dash before the first sign or without
   speedvisiond. Drawn under the vision square, so the pulse slides under it; the drawing changes nothing."""
   def __init__(self):
@@ -82,6 +100,8 @@ class SignReading(Widget):
     self._text: str = ""
     self._crossed: bool = False
     self._confidence: str = ""
+    self._road: str = ""
+    self._road_crossed: bool = False
     self._distance: str = ""
     self._seen: bool = False
     self._pulse_at: float = -math.inf
@@ -90,19 +110,28 @@ class SignReading(Widget):
     sm = ui_state.sm
     alive = sm.alive['speedVisionSP']
     vision = sm['speedVisionSP']
-    self._text, self._crossed = reading_text(vision.rawSignClass, vision.rawSignValue) if alive else ("", False)
-    self._confidence = f"{round(vision.rawSignConfidence * 100)}%" if self._text else ""
+    if alive:
+      (self._text, self._crossed, self._confidence), (self._road, self._road_crossed) = square_and_road(
+        vision.rawSignClass, vision.rawSignValue, vision.rawSignConfidence, (self._text, self._crossed, self._confidence))
+    else:
+      self._text, self._crossed, self._confidence, self._road, self._road_crossed = "", False, "", "", False
     self._seen = alive and vision.rawSignSeen
     self._distance = distance_text(vision.signDistance, ui_state.is_metric) if alive else ""
     if alive and sm.updated['speedVisionSP'] and vision.signRead:
       self._pulse_at = rl.get_time()
 
-  def _draw_line(self, box: rl.Rectangle, text: str, font_size: float, middle: float, color: rl.Color) -> rl.Vector2:
-    """One of the three lines, centred, its capitals' middle at middle; where it went."""
+  def _draw_line(self, box: rl.Rectangle, text: str, font_size: float, middle: float, color: rl.Color,
+                 crossed: bool = False) -> None:
+    """A line, centred, its capitals' middle at middle, shrunk to TEXT_WIDTH, crossed out when asked."""
+    width = measure_text_cached(self._font, text, font_size).x
+    font_size *= min(1., TEXT_WIDTH / width) if width > 0 else 1.
     size = measure_text_cached(self._font, text, font_size)
     position = rl.Vector2(box.x + (READING_SIZE - size.x) / 2, box.y + middle - CAP_MIDDLE * size.y)
     rl.draw_text_ex(self._font, text, position, font_size, 0, color)
-    return position
+    if crossed:
+      centre = position.y + CAP_MIDDLE * size.y
+      rl.draw_line_ex(rl.Vector2(position.x - 2, centre + size.y / 3), rl.Vector2(position.x + size.x + 2, centre - size.y / 3),
+                      CROSS, color)
 
   def _render(self, rect: rl.Rectangle) -> None:
     if not ui_state.speed_limit_vision_display or ui_state.sm.recv_frame["carState"] < ui_state.started_frame:
@@ -117,7 +146,12 @@ class SignReading(Widget):
       rl.draw_rectangle_rounded(outer, ROUNDNESS, SEGMENTS, rl.Color(255, 255, 255, int(70 * pulse)))
       rl.draw_rectangle_rounded_lines_ex(outer, ROUNDNESS, SEGMENTS, BORDER, rl.Color(255, 255, 255, int(255 * pulse)))
     rl.draw_rectangle_rounded(box, ROUNDNESS, SEGMENTS, DARK_GREY)
-    rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, RED if self._seen else GREY)
+    rl.draw_rectangle_rounded_lines_ex(box, ROUNDNESS, SEGMENTS, BORDER, RED if self._seen and not self._road else GREY)
+    if self._road:
+      under = rl.Rectangle(box.x, box.y + READING_SIZE + ROAD_GAP, READING_SIZE, ROAD_HEIGHT)
+      rl.draw_rectangle_rounded(under, ROUNDNESS, SEGMENTS, DARK_GREY)
+      rl.draw_rectangle_rounded_lines_ex(under, ROUNDNESS, SEGMENTS, BORDER, RED if self._seen else GREY)
+      self._draw_line(under, self._road, ROAD_FONT_SIZE, ROAD_HEIGHT / 2, rl.WHITE, self._road_crossed)
 
     color = rl.WHITE if self._text else GREY
     if self._confidence:
@@ -127,12 +161,4 @@ class SignReading(Widget):
       self._draw_line(box, self._distance, SMALL_FONT_SIZE, DISTANCE_MIDDLE, rl.WHITE)
 
     text = self._text or "-"
-    font_size = FONT_SIZES.get(len(text), FONT_SIZES[4])
-    width = measure_text_cached(self._font, text, font_size).x
-    font_size *= min(1., TEXT_WIDTH / width) if width > 0 else 1.
-    position = self._draw_line(box, text, font_size, TEXT_MIDDLE, color)
-    if self._crossed:
-      size = measure_text_cached(self._font, text, font_size)
-      middle = position.y + CAP_MIDDLE * size.y
-      rl.draw_line_ex(rl.Vector2(position.x - 2, middle + size.y / 3), rl.Vector2(position.x + size.x + 2, middle - size.y / 3),
-                      CROSS, color)
+    self._draw_line(box, text, FONT_SIZES.get(len(text), FONT_SIZES[4]), TEXT_MIDDLE, color, self._crossed)
