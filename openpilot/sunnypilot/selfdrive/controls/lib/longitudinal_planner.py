@@ -17,6 +17,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAle
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.stop_ahead import StopAhead
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
@@ -30,6 +31,7 @@ class LongitudinalPlannerSP:
     self.scc = SmartCruiseControl()
     self.resolver = SpeedLimitResolver()
     self.sla = SpeedLimitAssist(CP, CP_SP)
+    self.stop_ahead = StopAhead()
     self.generation = int(model_bundle.generation) if (model_bundle := get_active_bundle()) else None
     self.source = LongitudinalPlanSource.cruise
     self.e2e_alerts_helper = E2EAlertsHelper()
@@ -82,6 +84,9 @@ class LongitudinalPlannerSP:
     # forced deceleration always wins.
     if self.sla.smartspeed and not sm['controlsState'].forceDecel:
       v_cruise = self.get_engage_only_target(long_enabled, v_ego, v_cruise)
+
+    # A stop the brain says (a red light, a stop sign): its braking is one of the planner's candidates
+    self.stop_ahead.update(sm, long_enabled and self.sla.smartspeed, v_ego)
 
     # Smart Cruise Control: off in Smartspeed, the speed for curves is the network's (its toggles stay as they are)
     self.scc.update(sm, long_enabled and not self.sla.smartspeed, long_override, v_ego, a_ego, v_cruise)
@@ -152,6 +157,11 @@ class LongitudinalPlannerSP:
     assist.active = self.sla.is_active
     assist.vTarget = float(self.sla.output_v_target)
     assist.aTarget = float(self.sla.output_a_target)
+    stop = speedLimit.stop
+    stop.enabled = self.stop_ahead.enabled
+    stop.active = self.stop_ahead.active
+    stop.distance = float(self.stop_ahead.distance)
+    stop.aTarget = float(self.stop_ahead.output_a_target) if self.stop_ahead.active else 0.
 
     # E2E Alerts
     e2eAlerts = longitudinalPlanSP.e2eAlerts

@@ -265,6 +265,7 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
   struct SpeedLimit {
     resolver @0 :Resolver;
     assist @1 :Assist;
+    stop @2 :Stop;
 
     struct Resolver {
       speedLimit @0 :Float32;
@@ -284,6 +285,14 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       active @2 :Bool;
       vTarget @3 :Float32;
       aTarget @4 :Float32;
+    }
+
+    # Smartspeed: a stop the brain says (a red light, a stop sign), braked for as one of the planner's candidates
+    struct Stop {
+      enabled @0 :Bool;  # the Stop for Smartspeed toggle
+      active @1 :Bool;  # the brain says a stop and openpilot drives the speed in Smartspeed
+      distance @2 :Float32;  # m to it, 0 at it
+      aTarget @3 :Float32;  # m/s², the braking given to the planner
     }
 
     enum Source {
