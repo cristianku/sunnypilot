@@ -83,8 +83,8 @@ class LongitudinalPlannerSP:
     if self.sla.smartspeed and not sm['controlsState'].forceDecel:
       v_cruise = self.get_engage_only_target(long_enabled, v_ego, v_cruise)
 
-    # Smart Cruise Control
-    self.scc.update(sm, long_enabled, long_override, v_ego, a_ego, v_cruise)
+    # Smart Cruise Control: off in Smartspeed, the speed for curves is the network's (its toggles stay as they are)
+    self.scc.update(sm, long_enabled and not self.sla.smartspeed, long_override, v_ego, a_ego, v_cruise)
 
     targets = {
       LongitudinalPlanSource.cruise: (v_cruise, a_ego),
