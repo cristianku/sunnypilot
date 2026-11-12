@@ -56,7 +56,10 @@ ROAD_SIGNS = ("pedestrian_crossing", "children", "cyclists", "traffic_queue", "r
               "roundabout", "one_way", "direction_left", "direction_right", "direction_straight", "direction_several",
               "motorway_direction", "motorway_exit", "other",
               # A traffic light by what is lit: a flashing amber is amber, off, amber... in the ages of the two
-              "traffic_light_red", "traffic_light_amber", "traffic_light_green", "traffic_light_off")
+              "traffic_light_red", "traffic_light_amber", "traffic_light_green", "traffic_light_off",
+              # Who is on the road, as the classifier reads them
+              "road_user_person", "road_user_bicycle", "road_user_motorcycle", "road_user_car", "road_user_truck",
+              "road_user_bus", "road_user_tram", "road_user_other")
 SIGN_KPH_SCALE = 130.0
 SIGN_AGE_SCALE = math.log1p(3600.0)
 LEAD_METRES_SCALE = 100.0
