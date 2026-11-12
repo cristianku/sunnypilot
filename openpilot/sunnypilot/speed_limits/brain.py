@@ -26,7 +26,8 @@ class BrainReader:
   """The network step by step: add_signs() on every frame read, step() when due. The picture is the one of its contract,
   bit for bit the frames of the training. speed_limit is the speed said (m/s), held between the steps, 0 before the first;
   speed_limit_ahead the next limit (m/s) and ahead_distance the metres to it at the last step, both 0 when the brain says
-  none, says the limit it holds, or has no such output.
+  none, says the limit it holds, or has no such output; road_type the road type it sees (contract output.road_types), for
+  the screen only, "" for a brain without it.
   Raises ValueError on a network that was trained with another brain_inputs.py or asks for what the car does not give."""
   def __init__(self, network, contract: dict, vision, width: int, height: int):
     if contract["inputs_sha256"] not in (hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest(), *brain_inputs.SAME_GROUPS):
@@ -42,6 +43,7 @@ class BrainReader:
     pictures = {"road_type": vision.RoadTypeInput, "brain": vision.BrainInput}
     self.image = pictures[contract["step"].get("picture", "road_type")](width, height)
     self.metres_scale = contract["output"].get("metres_scale", 0.0)
+    self.road_types = contract["output"].get("road_types", [])
     self.signs = brain_inputs.SignInputs(vision)
     self.class_plate = vision.class_plate
     self.plates = {plate for plate, trained in (("time", contract["step"].get("plates", False)),
@@ -51,6 +53,7 @@ class BrainReader:
     self.speed_limit = 0.0
     self.speed_limit_ahead = 0.0
     self.ahead_distance = 0.0
+    self.road_type = ""
     self.last_step = -math.inf
     self.next_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
@@ -123,4 +126,6 @@ class BrainReader:
       if ahead > 0 and ahead != self.speed_limit:
         self.speed_limit_ahead = ahead
         self.ahead_distance = max(0.0, float(outputs["metres"].reshape(-1)[0]) * self.metres_scale)
+    if "road_type" in outputs:
+      self.road_type = self.road_types[int(np.argmax(outputs["road_type"]))]
     return self.speed_limit

@@ -130,6 +130,7 @@ class FakeBrain:
   """A BrainReader saying 77 km/h from its first step, and the limit ahead of `ahead` (km/h, metres), with what the
   daemon gave it."""
   ahead = (0.0, 0.0)
+  road_type = ""
 
   def __init__(self, network, contract, vision, width, height):
     self.speed_limit = self.speed_limit_ahead = self.ahead_distance = 0.0

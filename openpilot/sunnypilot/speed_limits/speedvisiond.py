@@ -244,6 +244,8 @@ def main() -> None:
       memory.fill_log(msg.speedVisionSP)  # for the logs: the last sign read
       msg.speedVisionSP.speedLimitState = "limit" if reader.speed_limit > 0 else "unknown"
       msg.speedVisionSP.speedLimitReason = "brain"
+      if reader.road_type:  # shown on the screen only; a brain exported before 12 Nov 2026 has none
+        msg.speedVisionSP.roadType = reader.road_type
     else:
       if road_types is not None and road_types.due(now):
         # Right after SignNet, while the GPU is still free of the driving model.

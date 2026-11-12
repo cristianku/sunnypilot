@@ -303,6 +303,25 @@ def test_it_says_the_next_limit_and_the_metres_to_it(vision, ahead, metres, said
   assert (reader.speed_limit_ahead, reader.ahead_distance) == pytest.approx(said)
 
 
+class RoadTypeNetwork(Network):
+  """Says 15 km/h and the second road type."""
+  def __call__(self, image, extra, hidden):
+    return super().__call__(image, extra, hidden) | {'road_type': np.array([[0.1, 0.8, 0.1]], dtype=np.float32)}
+
+
+def test_it_says_the_road_type_for_the_screen(vision):
+  types = contract(output={'kph': [5, 10, 15, 20], 'road_types': ['town', 'motorway', 'rural']})
+  reader = brain.BrainReader(RoadTypeNetwork(), types, vision, 64, 32)
+  assert reader.road_type == ""
+  reader.step(0.0, *frame(), None, None, None, None, 0.0)
+  assert (reader.road_type, reader.speed_limit) == ("motorway", pytest.approx(15 / 3.6))
+
+
+def test_a_brain_without_the_road_type_says_none(reader):
+  reader.step(0.0, *frame(), None, None, None, None, 0.0)
+  assert reader.road_type == ""
+
+
 def test_the_sign_distance_row():
   assert list(brain_inputs.sign_distance_row(0.0)) == [0.0, 0.0]
   assert list(brain_inputs.sign_distance_row(-3.0)) == [0.0, 0.0]
