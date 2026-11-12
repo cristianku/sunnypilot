@@ -202,13 +202,14 @@ class SignInputs:
 
 def sign_box_channel(vision):
   """What gives the channel of sign_boxes for a class of the classifier: 0 for a speed sign or the end of a limit (every
-  class vision.class_speed reads a number from, the end of a limit, a variable display lit or not), 1 for any other sign
-  (other_sign, but not NOT_SIGNS), None for the rest (unreadable, not a sign)."""
+  speed kind, its number read or not yet: the far sign is maximum_speed:unknown; the end of a limit; a variable display
+  lit or not), 1 for any other sign (other_sign, but not NOT_SIGNS) and for a sign the classifier cannot read
+  (unreadable), None for the rest (not a sign, a light, a road user)."""
   def channel(name: str) -> int | None:
     kind, _, value = name.partition(":")
-    if vision.class_speed(name) is not None or kind == vision.VARIABLE_DISPLAY:
+    if kind in vision.SPEED_KINDS or kind == vision.CANCELLATION:
       return 0
-    if kind == "other_sign" and not value.startswith(NOT_SIGNS):
+    if kind == "other_sign" and not value.startswith(NOT_SIGNS) or kind == "unreadable":
       return 1
     return None
 
