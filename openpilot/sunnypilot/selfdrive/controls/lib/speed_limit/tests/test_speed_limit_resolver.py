@@ -216,14 +216,15 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     assert resolver.source == expected_source
 
   @parameterized.expand([
-    (80., 50., 300., 0., 80., 0.),  # beyond the braking distance: still the limit held
-    (80., 50., 50., 0., 50., 50.),  # within it: the lower limit ahead, with its distance
-    (80., 50., 50., 1., 50., 50. - 80 * CV.KPH_TO_MS),  # less the distance driven since speedvisiond sent it
-    (45., 50., 50., 0., 50., 50.),  # already slower than the limit ahead: it holds
-    (80., 120., 30., 0., 80., 0.),  # a higher limit waits for the sign, as the map's
+    # The network's limit ahead is never driven to: the speed it says is the set speed, lowered by the network itself
+    (80., 50., 300., 0., 80., 0.),
+    (80., 50., 50., 0., 80., 0.),  # within the braking distance too
+    (80., 50., 50., 1., 80., 0.),
+    (45., 50., 50., 0., 80., 0.),
+    (80., 120., 30., 0., 80., 0.),
     (80., 0., 30., 0., 80., 0.),  # nothing ahead
   ], names=["v_kph", "ahead_kph", "ahead_distance", "age", "limit_kph", "distance"])
-  def test_vision_limit_ahead(self, resolver_class, v_kph, ahead_kph, ahead_distance, age, limit_kph, distance, mocker):
+  def test_vision_limit_ahead_is_only_shown(self, resolver_class, v_kph, ahead_kph, ahead_distance, age, limit_kph, distance, mocker):
     resolver = resolver_class()
     resolver.policy = Policy.vision_only
     resolver.update(v_kph * CV.KPH_TO_MS, setup_vision_sm_mock(mocker, 0., 80 * CV.KPH_TO_MS, 0.,

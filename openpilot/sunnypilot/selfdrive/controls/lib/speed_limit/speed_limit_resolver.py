@@ -123,8 +123,9 @@ class SpeedLimitResolver:
 
   def _get_from_vision(self, sm: messaging.SubMaster) -> None:
     """The limit of the speed-limits neural network (speedVisionSP): 0 when it is not sure or speedvisiond is not
-    running (a stale message is never used), and its limit ahead like the map's. Only Smartspeed (Vision Only, and a
-    stored Map Data + Vision) takes it."""
+    running (a stale message is never used). The speed it says is the whole of it, a set speed given again at every
+    step: the network lowers it itself before a sign or a red light. Its limit ahead and the metres to it are only shown
+    and logged, never driven to (12 Nov 2026). Only Smartspeed (Vision Only, and a stored Map Data + Vision) takes it."""
     self._reset_limit_sources(SpeedLimitSource.vision)
     try:
       alive = sm.alive['speedVisionSP']
@@ -132,8 +133,7 @@ class SpeedLimitResolver:
     except KeyError:
       return
     if alive:
-      self._calculate_limits(SpeedLimitSource.vision, max(0., vision.speedLimit), vision.speedLimitAhead,
-                             vision.speedLimitAheadDistance, sm.recv_time['speedVisionSP'])
+      self._calculate_limits(SpeedLimitSource.vision, max(0., vision.speedLimit), 0., 0., sm.recv_time['speedVisionSP'])
 
   def _get_from_map_data(self, sm: messaging.SubMaster) -> None:
     self._reset_limit_sources(SpeedLimitSource.map)
