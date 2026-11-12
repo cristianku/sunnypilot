@@ -15,6 +15,7 @@ from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import SMARTSPEED_CRUISE_ACCEL_MIN
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
@@ -52,6 +53,10 @@ class LongitudinalPlannerSP:
     elif self.engage_only_v_target == V_CRUISE_UNSET:
       self.engage_only_v_target = max(v_ego, V_CRUISE_INITIAL * CV.KPH_TO_MS)
     return min(self.engage_only_v_target, V_CRUISE_MAX * CV.KPH_TO_MS)
+
+  def get_cruise_accel_min(self, a_cruise_min: float) -> float:
+    # Two limits: Smartspeed slows down to the network's speed harder than the planner does to a set speed
+    return SMARTSPEED_CRUISE_ACCEL_MIN if self.sla.smartspeed else a_cruise_min
 
   def update_cluster_offset(self, CS) -> float:
     # What the dashboard adds to the speed the car holds, read from its set speed: a set speed of 50 on the PSA's
