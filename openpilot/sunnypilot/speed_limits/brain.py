@@ -6,12 +6,14 @@ See the LICENSE.md file in the root directory for more details.
 
 VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE READS THE MAP (liveMapDataSP).
 
-The brain: the network with memory that says the speed to hold, and a brain trained with them the next limit and the metres
-to it. It is the limit of the vision side when the release has one: no rule of vision.SpeedLimitMemory and no road-type
-network decides then. What the reader read goes in as an input (brain_inputs), the numbers that come out are published as
-they are. The contract's step says how: its rate, its clock ("last": a step once a period has passed since the last one,
-the first brains, at 1 Hz; "schedule": steps on a fixed grid of that rate, at the reading that comes first, as the
-training's frames are) and its picture ("road_type": vision.RoadTypeInput; "brain": vision.BrainInput).
+The brain: the network with memory that says the speed to hold. It is the limit of the vision side when the release has
+one: no rule of vision.SpeedLimitMemory and no road-type network decides then. What the reader read goes in as an input
+(brain_inputs), the speed that comes out is published as it is. The speed is all the car reads from it: a brain that also
+gives the next limit and the metres to it (outputs next and metres, the brains trained until 12 Nov 2026) steps as any
+other and those two are not read. The contract's step says how: its rate, its clock ("last": a step once a period has
+passed since the last one, the first brains, at 1 Hz; "schedule": steps on a fixed grid of that rate, at the reading that
+comes first, as the training's frames are) and its picture ("road_type": vision.RoadTypeInput; "brain":
+vision.BrainInput).
 """
 import hashlib
 import math
@@ -25,9 +27,7 @@ from openpilot.sunnypilot.speed_limits import brain_inputs
 class BrainReader:
   """The network step by step: add_signs() on every frame read, step() when due. The picture is the one of its contract,
   bit for bit the frames of the training. speed_limit is the speed said (m/s), held between the steps, 0 before the first;
-  speed_limit_ahead the next limit (m/s) and ahead_distance the metres to it at the last step, both 0 when the brain says
-  none, says the limit it holds, or has no such output; road_type the road type it sees (contract output.road_types), for
-  the screen only, "" for a brain without it.
+  road_type the road type it sees (contract output.road_types), for the screen only, "" for a brain without it.
   Raises ValueError on a network that was trained with another brain_inputs.py or asks for what the car does not give."""
   def __init__(self, network, contract: dict, vision, width: int, height: int):
     if contract["inputs_sha256"] not in (hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest(), *brain_inputs.SAME_GROUPS):
@@ -42,7 +42,6 @@ class BrainReader:
     self.memory_gap = contract["step"]["memory_gap_seconds"]
     pictures = {"road_type": vision.RoadTypeInput, "brain": vision.BrainInput}
     self.image = pictures[contract["step"].get("picture", "road_type")](width, height)
-    self.metres_scale = contract["output"].get("metres_scale", 0.0)
     self.road_types = contract["output"].get("road_types", [])
     self.signs = brain_inputs.SignInputs(vision)
     self.class_plate = vision.class_plate
@@ -51,8 +50,6 @@ class BrainReader:
     self.class_hours = vision.class_hours if contract["step"].get("hours", False) else lambda name: None
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
-    self.speed_limit_ahead = 0.0
-    self.ahead_distance = 0.0
     self.road_type = ""
     self.last_step = -math.inf
     self.next_step = -math.inf
@@ -119,13 +116,6 @@ class BrainReader:
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
-    self.speed_limit_ahead = self.ahead_distance = 0.0
-    if "next" in outputs:  # the last class of next is none
-      index = int(np.argmax(outputs["next"]))
-      ahead = self.kph[index] / 3.6 if index < len(self.kph) else 0.0
-      if ahead > 0 and ahead != self.speed_limit:
-        self.speed_limit_ahead = ahead
-        self.ahead_distance = max(0.0, float(outputs["metres"].reshape(-1)[0]) * self.metres_scale)
     if "road_type" in outputs:
       self.road_type = self.road_types[int(np.argmax(outputs["road_type"]))]
     return self.speed_limit

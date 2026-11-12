@@ -86,10 +86,10 @@ The contract's `step` says how it steps, and a contract without these keys is th
   pictures with the same class.
 - `groups`: a brain trained with `sign_distance` gets the metres to the sign ahead, clipped at 200 m, 0 for none.
 
-A brain trained with the outputs `next` (the classes of `kph` and a last one for none) and `metres` also says the next limit
-and the metres to it (`metres` x `output.metres_scale`). They are `speedLimitAhead` and `speedLimitAheadDistance`, counted
-down by the metres driven since the step, and none when it says none or the limit it holds. The resolver takes the limit
-ahead as it takes the map's: only a lower one, within the distance to adapt to it.
+The speed is all the car reads from a brain. A brain trained until 12 Nov 2026 also has the outputs `next` (the next limit)
+and `metres` (the metres to it): it loads and steps as any other, and the two are not read. With a brain `speedLimitAhead`
+and `speedLimitAheadDistance` stay 0; a release without one still fills them (`vision.LimitAhead`), and the resolver drives
+to them as to the map's.
 
 The contract holds the sha256 of the `brain_inputs.py` it was trained with (or one in `SAME_GROUPS`): the car refuses another
 one, and speedvisiond then sends nothing, so there is no limit. Without a `brain` the old limit runs as before.

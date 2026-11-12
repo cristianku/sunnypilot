@@ -25,10 +25,10 @@ the driver to check. A limit read on such a sign starts at the sign, as the map'
 limit ahead, with its distance (speedLimitAhead, speedLimitAheadDistance, vision.LimitAhead).
 A release with a brain (brain.BrainReader) is another vision limit: what was read, the distance to the sign, the car
 ahead, the hour and the country go into that network at the rate of its contract (once a second for the first brains,
-at every reading for a brain at 4 Hz), the speed it says is speedLimit, and a brain trained with them gives the next
-limit and the metres to it, speedLimitAhead and speedLimitAheadDistance, counted down by the metres driven between its
-steps. Neither the rules of the memory, nor the road-type network, nor vision.LimitAhead are run. The distance to a sign
-stays on the screen; signRead pulses on a number confirmed.
+at every reading for a brain at 4 Hz), and the speed it says is speedLimit. That speed is all that is read from a brain:
+with one speedLimitAhead and speedLimitAheadDistance stay 0, also when the network gives a next limit and the metres to it
+(the brains trained until 12 Nov 2026). Neither the rules of the memory, nor the road-type network, nor vision.LimitAhead
+are run. The distance to a sign stays on the screen; signRead pulses on a number confirmed.
 When the release has the applicability network (applicability.Applicability), it rules right after the classifier the
 signs of the families it learnt: a sign it gives to another road (a side street, an exit, the lane beside) is not
 taken, neither by the memory, nor by the brain, nor by the distance; the reading square still shows it, with
@@ -174,7 +174,6 @@ def main() -> None:
   v_ego: float | None = None
   lead: tuple[float, float] | None = None  # metres and km/h of the car ahead
   gps_clock: tuple[float, float] | None = None  # the GPS clock of the last fix (s) and when it came
-  step_odometer = 0.0  # the odometer at the brain's last step
   next_frame = 0.0
   while True:
     buf = client.recv()
@@ -231,15 +230,11 @@ def main() -> None:
         # Right after SignNet, while the GPU is still free of the driving model.
         unix = gps_clock[0] + now - gps_clock[1] if gps_clock is not None else None
         reader.step(now, y, uv, lead, unix, gps_country, v_ego, sign_distance)
-        step_odometer = distance.odometer
       if raw is not None:
         memory.note_raw(raw)
         # Given to the brain: read sure enough and not of another road.
         memory.raw_taken = raw["confidence"] >= vision.MIN_CONFIDENCE and memory.raw_road != vision.OTHER_ROAD
       msg.speedVisionSP.speedLimit = float(reader.speed_limit)
-      if reader.speed_limit_ahead > 0:
-        msg.speedVisionSP.speedLimitAhead = float(reader.speed_limit_ahead)
-        msg.speedVisionSP.speedLimitAheadDistance = float(max(0.0, reader.ahead_distance - (distance.odometer - step_odometer)))
       msg.speedVisionSP.signRead = reader.signs.read_at == now
       memory.fill_log(msg.speedVisionSP)  # for the logs: the last sign read
       msg.speedVisionSP.speedLimitState = "limit" if reader.speed_limit > 0 else "unknown"

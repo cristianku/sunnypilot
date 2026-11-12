@@ -217,29 +217,32 @@ def test_it_gets_openpilot_engaged_and_what_turned_it_off(vision):
 
 
 def test_a_brain_of_the_first_contracts_steps_as_before(vision):
-  # No clock, picture or next output in its contract: the road-type picture once a second, the sign distance not sent
+  # No clock or picture in its contract: the road-type picture once a second, the sign distance not sent
   reader = brain.BrainReader(Network(), contract(), vision, 64, 32)
   assert isinstance(reader.image, vision.RoadTypeInput) and not reader.schedule
   reader.step(0.0, *frame(), None, None, None, None, 0.0)
   reader.step(1.0, *frame(), None, None, None, None, 50.0)
   first, second = (call[1] for call in reader.network.calls)
   assert first.shape == second.shape == (1, SIZE) and np.array_equal(first, second)
-  assert (reader.speed_limit_ahead, reader.ahead_distance) == (0.0, 0.0)
 
 
 def test_the_published_brain_still_loads(vision):
   published = Path(brain.__file__).parent / 'models' / 'brain.onnx.contract.json'
   if not published.exists():
     pytest.skip('no published brain in this checkout')
-  reader = brain.BrainReader(Network(), json.loads(published.read_text()), vision, 64, 32)
+  said = json.loads(published.read_text())
+  reader = brain.BrainReader(AheadNetwork(1, 0.8), said, vision, 64, 32)
   assert reader.due(0.0)
+  # Its network (11 Nov 2026) also gives the next limit and the metres to it: stepped all the same, its speed is the limit
+  assert reader.step(0.0, *frame(), None, None, None, None, 50.0) == pytest.approx(said['output']['kph'][2] / 3.6)
 
 
 AHEAD_GROUPS = [*GROUPS, 'sign_distance']
 
 
 def four_hz(vision, network=None):
-  """A brain of 4 steps a second on the grid, with the brain's picture, the sign distance and the next limit."""
+  """A brain of 4 steps a second on the grid, with the brain's picture and the sign distance; its contract has the scale
+  of the metres to the next limit, as the brains trained until 12 Nov 2026, which the car does not read."""
   step = {'rate_hz': 4.0, 'groups': AHEAD_GROUPS, 'memory_gap_seconds': 5.0, 'clock': 'schedule', 'picture': 'brain'}
   output = {'kph': [5, 10, 15, 20], 'metres_scale': 100.0}
   return brain.BrainReader(network or Network(), contract(step=step, output=output), vision, 64, 32)
@@ -279,7 +282,8 @@ def test_a_brain_at_4_hz_sees_its_picture_and_the_sign_distance(vision):
 
 
 class AheadNetwork(Network):
-  """Says 15 km/h, the next limit of class `ahead` (4: none) and the metres / 100 to it."""
+  """Says 15 km/h and, as the brains trained until 12 Nov 2026, the next limit of class `ahead` (4: none) and the
+  metres / 100 to it."""
   def __init__(self, ahead, metres):
     super().__init__()
     self.ahead, self.metres = ahead, metres
@@ -289,17 +293,20 @@ class AheadNetwork(Network):
     return outputs | {'next': np.eye(5, dtype=np.float32)[self.ahead][None], 'metres': np.array([[self.metres]], dtype=np.float32)}
 
 
-@pytest.mark.parametrize('ahead, metres, said', [
-  (1, 0.8, (10 / 3.6, 80.0)),
-  (0, -0.1, (5 / 3.6, 0.0)),  # never behind
-  (4, 0.8, (0.0, 0.0)),  # none ahead
-  (2, 0.8, (0.0, 0.0)),  # the limit it holds is no limit ahead
+@pytest.mark.parametrize('ahead, metres', [
+  (1, 0.8),  # a lower limit in 80 m
+  (0, -0.1),
+  (4, 0.8),  # none ahead
+  (2, 0.8),  # the limit it holds
 ])
-def test_it_says_the_next_limit_and_the_metres_to_it(vision, ahead, metres, said):
+def test_a_network_that_gives_the_next_limit_and_the_metres_says_only_its_speed(vision, ahead, metres):
   reader = four_hz(vision, AheadNetwork(ahead, metres))
-  reader.step(0.0, *frame(), None, None, None, None, 0.0)
+  assert reader.step(0.0, *frame(), None, None, None, None, 0.0) == pytest.approx(15 / 3.6)
+  assert reader.step(0.25, *frame(), None, None, None, None, 0.0) == pytest.approx(15 / 3.6)
   assert reader.speed_limit == pytest.approx(15 / 3.6)
-  assert (reader.speed_limit_ahead, reader.ahead_distance) == pytest.approx(said)
+  assert reader.network.calls[1][2][0, 0] == 1  # stepped as any other: its memory goes on
+  # Nothing else is said: no limit ahead, no metres, no scale for them
+  assert not {'speed_limit_ahead', 'ahead_distance', 'metres_scale'} & set(vars(reader))
 
 
 class RoadTypeNetwork(Network):
