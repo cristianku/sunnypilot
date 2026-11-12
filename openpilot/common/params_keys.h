@@ -289,7 +289,6 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},
     {"SpeedLimitValueOffset", {PERSISTENT | BACKUP, INT, "0"}},
     {"SpeedLimitVisionDisplay", {PERSISTENT | BACKUP, BOOL, "0"}},
-    {"SmartspeedStop", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"ReadSignsFullResolution", {PERSISTENT, BOOL, "0"}},
     {"RecordRoadFullResolution", {PERSISTENT, BOOL, "0"}},
 

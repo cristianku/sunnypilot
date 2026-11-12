@@ -961,20 +961,6 @@
               ]
             },
             {
-              "key": "SmartspeedStop",
-              "widget": "toggle",
-              "title": "Stop for Smartspeed",
-              "description": "When the network says a stop ahead (a red light, a stop sign), brake to stand there, up to 3 m/s\u00b2, and stay stopped while it says so. Without it Smartspeed only slows down gently. Needs openpilot longitudinal control.",
-              "visibility": [
-                {
-                  "type": "param_compare",
-                  "key": "SpeedLimitMode",
-                  "op": "==",
-                  "value": 4
-                }
-              ]
-            },
-            {
               "key": "SpeedLimitOffsetType",
               "widget": "multiple_button",
               "title": "Offset Type",
