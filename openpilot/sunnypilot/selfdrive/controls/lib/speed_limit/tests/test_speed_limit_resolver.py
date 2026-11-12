@@ -169,13 +169,13 @@ class TestSpeedLimitResolverValidation(OpenpilotTestCase):
 
 
 def setup_vision_sm_mock(mocker, car, vision, map_limit, vision_alive=True, vision_ahead=0., vision_ahead_distance=0.,
-                         vision_age=0.):
+                         vision_age=0., vision_reason="brain"):
   """carStateSP, speedVisionSP and liveMapDataSP with the given limits (0: none)."""
   sources = {
     'carState': create_mock({'gasPressed': False, 'brakePressed': False, 'standstill': False}, mocker),
     'carStateSP': create_mock({'speedLimit': car}, mocker),
     'speedVisionSP': create_mock({'speedLimit': vision, 'speedLimitAhead': vision_ahead,
-                                  'speedLimitAheadDistance': vision_ahead_distance}, mocker),
+                                  'speedLimitAheadDistance': vision_ahead_distance, 'speedLimitReason': vision_reason}, mocker),
     'liveMapDataSP': create_mock({'speedLimit': map_limit, 'speedLimitValid': map_limit > 0., 'speedLimitAhead': 0.,
                                   'speedLimitAheadValid': 0., 'speedLimitAheadDistance': 0.}, mocker),
   }
@@ -216,7 +216,7 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     assert resolver.source == expected_source
 
   @parameterized.expand([
-    # The network's limit ahead is never driven to: the speed it says is the set speed, lowered by the network itself
+    # The brain's limit ahead is never driven to: the speed it says is the set speed, lowered by the brain itself
     (80., 50., 300., 0., 80., 0.),
     (80., 50., 50., 0., 80., 0.),  # within the braking distance too
     (80., 50., 50., 1., 80., 0.),
@@ -230,6 +230,26 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     resolver.update(v_kph * CV.KPH_TO_MS, setup_vision_sm_mock(mocker, 0., 80 * CV.KPH_TO_MS, 0.,
                                                                vision_ahead=ahead_kph * CV.KPH_TO_MS,
                                                                vision_ahead_distance=ahead_distance, vision_age=age))
+    assert resolver.source == SpeedLimitSource.vision
+    self.assertAlmostEqual(resolver.speed_limit, limit_kph * CV.KPH_TO_MS, places=5)
+    self.assertAlmostEqual(resolver.distance, distance, delta=0.1)
+
+  @parameterized.expand([
+    # A release without a brain: the memory holds the old limit up to the sign, the lower one ahead goes through the
+    # rule of the map's
+    (80., 50., 300., 0., 80., 0.),  # beyond the braking distance: still the limit held
+    (80., 50., 50., 0., 50., 50.),  # within it: the lower limit ahead, with its distance
+    (80., 50., 50., 1., 50., 50. - 80 * CV.KPH_TO_MS),  # less the distance driven since speedvisiond sent it
+    (45., 50., 50., 0., 50., 50.),  # already slower than the limit ahead: it holds
+    (80., 120., 30., 0., 80., 0.),  # a higher limit waits for the sign, as the map's
+  ], names=["v_kph", "ahead_kph", "ahead_distance", "age", "limit_kph", "distance"])
+  def test_the_memorys_limit_ahead_is_driven_to(self, resolver_class, v_kph, ahead_kph, ahead_distance, age, limit_kph, distance, mocker):
+    resolver = resolver_class()
+    resolver.policy = Policy.vision_only
+    resolver.update(v_kph * CV.KPH_TO_MS, setup_vision_sm_mock(mocker, 0., 80 * CV.KPH_TO_MS, 0.,
+                                                               vision_ahead=ahead_kph * CV.KPH_TO_MS,
+                                                               vision_ahead_distance=ahead_distance, vision_age=age,
+                                                               vision_reason="sign"))
     assert resolver.source == SpeedLimitSource.vision
     self.assertAlmostEqual(resolver.speed_limit, limit_kph * CV.KPH_TO_MS, places=5)
     self.assertAlmostEqual(resolver.distance, distance, delta=0.1)

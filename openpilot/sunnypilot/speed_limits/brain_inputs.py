@@ -100,7 +100,7 @@ class SignInputs:
     self._hours: dict = {}  # number: (when, (from, to)) of its last reading with hours: one without them takes nothing away
     self.number, self.kind, self.read_at, self.ended, self.plate, self.hours = None, "", None, False, None, None
     self.single, self.single_at = None, None
-    self._road_read: dict = {}  # kind: its last reading
+    self._road_read: dict = {}  # kind: its readings of the last CONFIRM_SECONDS
     self._road_seen: dict = {}  # kind: its last reading once confirmed
 
   def add(self, now: float, signs: list) -> None:
@@ -112,9 +112,10 @@ class SignInputs:
       if family == "other_sign" and kind in ROAD_SIGNS and confidence >= self._vision.MIN_CONFIDENCE:
         kinds.add(kind)
     for kind in kinds:
-      if now - self._road_read.get(kind, -math.inf) <= self._vision.CONFIRM_SECONDS:
+      times = [at for at in self._road_read.get(kind, []) if now - at <= self._vision.CONFIRM_SECONDS] + [now]
+      self._road_read[kind] = times
+      if len(times) >= self._vision.CONFIRM_FRAMES:
         self._road_seen[kind] = now
-      self._road_read[kind] = now
     read: dict = {}
     for name, confidence, *said in signs:
       value = self._vision.class_speed(name)

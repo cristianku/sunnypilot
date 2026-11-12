@@ -123,9 +123,11 @@ class SpeedLimitResolver:
 
   def _get_from_vision(self, sm: messaging.SubMaster) -> None:
     """The limit of the speed-limits neural network (speedVisionSP): 0 when it is not sure or speedvisiond is not
-    running (a stale message is never used). The speed it says is the whole of it, a set speed given again at every
-    step: the network lowers it itself before a sign or a red light. Its limit ahead and the metres to it are only shown
-    and logged, never driven to (12 Nov 2026). Only Smartspeed (Vision Only, and a stored Map Data + Vision) takes it."""
+    running (a stale message is never used). The speed the brain says is the whole of it, a set speed given again at
+    every step: the brain lowers it itself before a sign or a red light, and its limit ahead and the metres to it are
+    only shown and logged, never driven to (12 Nov 2026). A release without a brain (speedLimitReason is not "brain")
+    holds the old limit up to the sign and leaves the lower one ahead for the rule the map's goes through. Only
+    Smartspeed (Vision Only, and a stored Map Data + Vision) takes it."""
     self._reset_limit_sources(SpeedLimitSource.vision)
     try:
       alive = sm.alive['speedVisionSP']
@@ -133,7 +135,8 @@ class SpeedLimitResolver:
     except KeyError:
       return
     if alive:
-      self._calculate_limits(SpeedLimitSource.vision, max(0., vision.speedLimit), 0., 0., sm.recv_time['speedVisionSP'])
+      ahead, distance = (0., 0.) if vision.speedLimitReason == "brain" else (vision.speedLimitAhead, vision.speedLimitAheadDistance)
+      self._calculate_limits(SpeedLimitSource.vision, max(0., vision.speedLimit), ahead, distance, sm.recv_time['speedVisionSP'])
 
   def _get_from_map_data(self, sm: messaging.SubMaster) -> None:
     self._reset_limit_sources(SpeedLimitSource.map)

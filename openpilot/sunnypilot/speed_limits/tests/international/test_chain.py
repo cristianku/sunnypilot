@@ -88,7 +88,7 @@ def chain(candidate):
   sla = sla_env['SpeedLimitAssist'](cp, NS(pcmCruiseSpeed=False))
   data = {
     'carStateSP': NS(speedLimit=99),
-    'speedVisionSP': NS(speedLimit=0, speedLimitAhead=0, speedLimitAheadDistance=0),
+    'speedVisionSP': NS(speedLimit=0, speedLimitAhead=0, speedLimitAheadDistance=0, speedLimitReason=''),
     'liveMapDataSP': NS(speedLimit=0, speedLimitValid=False, speedLimitAhead=0, speedLimitAheadValid=False, speedLimitAheadDistance=0),
   }
 

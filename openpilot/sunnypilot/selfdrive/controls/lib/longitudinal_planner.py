@@ -54,9 +54,10 @@ class LongitudinalPlannerSP:
       self.engage_only_v_target = max(v_ego, V_CRUISE_INITIAL * CV.KPH_TO_MS)
     return min(self.engage_only_v_target, V_CRUISE_MAX * CV.KPH_TO_MS)
 
-  def get_cruise_accel_min(self, a_cruise_min: float) -> float:
-    # Two limits: Smartspeed slows down to the network's speed harder than the planner does to a set speed
-    return SMARTSPEED_CRUISE_ACCEL_MIN if self.sla.smartspeed else a_cruise_min
+  def get_cruise_accel_min(self, a_cruise_min: float, force_decel: bool) -> float:
+    # Two limits: Smartspeed slows down to the network's speed harder than the planner does to a set speed. A forced
+    # deceleration is not the network's: it stays openpilot's in every mode
+    return SMARTSPEED_CRUISE_ACCEL_MIN if self.sla.smartspeed and not force_decel else a_cruise_min
 
   def update_cluster_offset(self, CS) -> float:
     # What the dashboard adds to the speed the car holds, read from its set speed: a set speed of 50 on the PSA's

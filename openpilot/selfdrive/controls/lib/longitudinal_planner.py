@@ -106,7 +106,8 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
-    self.a_cruise = get_cruise_accel(v_cruise, v_ego, self.a_cruise, self.dt, self.get_cruise_accel_min(A_CRUISE_MIN))
+    self.a_cruise = get_cruise_accel(v_cruise, v_ego, self.a_cruise, self.dt,
+                                     self.get_cruise_accel_min(A_CRUISE_MIN, sm['controlsState'].forceDecel))
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
     output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, self.a_cruise)
