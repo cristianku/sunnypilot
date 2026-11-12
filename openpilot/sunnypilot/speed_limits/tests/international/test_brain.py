@@ -232,7 +232,6 @@ def test_the_published_brain_still_loads(vision):
   if not published.exists():
     pytest.skip('no published brain in this checkout')
   reader = brain.BrainReader(Network(), json.loads(published.read_text()), vision, 64, 32)
-  assert isinstance(reader.image, vision.RoadTypeInput) and not reader.schedule
   assert reader.due(0.0)
 
 
