@@ -31,14 +31,19 @@ The groups, each one apart so that a comparison can leave it out:
   driver who takes over where the limit said is wrong often brakes once and then lets the car slow down by itself, with no
   pedal pressed: the pedals of the last second no longer show it, openpilot off still does.
 - sign_distance: the metres to the round sign ahead as vision.SignDistance measures them from its box and the car's speed
-  (the same class on the car and on the server), known; nothing once it is passed. With it the brain can say where its
-  next limit starts.
+  (the same class on the car and on the server), known; nothing once it is passed. Only for the brains trained until 12
+  Nov 2026, which said where their next limit starts: no brain learns from it since (the server's LEFT_OUT), a brain gets
+  the boxes themselves (sign_boxes) and no metres worked out by a formula.
 - motion: the car's own turn signals, steering wheel and yaw (MotionInputs): a blinker on in the last BLINKER_SECONDS and
   how long ago it was last on, left and right; the steering angle; the yaw rate (deviceMotion, the car's yawRate when the
   device gives none); each known. A turn signal before an exit or a junction says the limit is about to change.
 - road_signs: every other sign the classifier reads (ROAD_SIGNS, all the kinds of other_sign, none picked out): for each,
   whether one was confirmed (2 readings within CONFIRM_SECONDS, the numbers' own rule) and the age of its last reading
   since. Stop, give way, a crossing, a roundabout, a town or a motorway: the network weighs what each says.
+- sign_boxes: where the signs of the last frame read are in the picture and how big (BoxInputs), as SignNet's boxes say,
+  with no metres worked out: the picture cut in BOX_COLUMNS columns and, for the speed signs and for the other signs
+  (sign_box_channel), the tallest box of each column; then whether a sign was ever seen and the age of the last one. A
+  sign grows and moves to the side as the car nears it: what that means for the speed the network learns.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -66,6 +71,10 @@ LEAD_METRES_SCALE = 100.0
 LEAD_METRES_MAX = 200.0
 SIGN_METRES_SCALE = 100.0
 SIGN_METRES_MAX = 200.0
+BOX_COLUMNS = 8  # a group of boxes (BoxInputs) cuts the picture in so many columns, left to right
+BOX_NUMBERS = 3  # of a box: its width and its height over the frame's, its centre y over the frame's height
+SIGN_BOX_CHANNELS = 2  # of sign_boxes (sign_box_channel): a speed sign or the end of a limit, any other sign
+NOT_SIGNS = ("traffic_light_", "road_user_")  # the kinds of other_sign that are no signs: a light, who is on the road
 SPEED_MAX = 60.0  # m/s
 SPEED_SCALE = 30.0
 PEDAL_SECONDS = 1.0
@@ -87,9 +96,16 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0",
                "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d",
                "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629")
+
+
+def box_size(channels: int) -> int:
+  """The size of a group of boxes with so many channels: BOX_NUMBERS a channel and column, then known and the age."""
+  return channels * BOX_COLUMNS * BOX_NUMBERS + 2
+
+
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
-               "motion": 8, "road_signs": 2 * len(ROAD_SIGNS)}
+               "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS)}
 
 
 class SignInputs:
@@ -181,6 +197,72 @@ class SignInputs:
     row = np.zeros(INPUT_SIZES["plate_hours"], dtype=np.float32)
     if self.hours is not None:
       row[:] = *hour_row(self.hours[0])[:2], *hour_row(self.hours[1])[:2], 1.0
+    return row
+
+
+def sign_box_channel(vision):
+  """What gives the channel of sign_boxes for a class of the classifier: 0 for a speed sign or the end of a limit (every
+  class vision.class_speed reads a number from, the end of a limit, a variable display lit or not), 1 for any other sign
+  (other_sign, but not NOT_SIGNS), None for the rest (unreadable, not a sign)."""
+  def channel(name: str) -> int | None:
+    kind, _, value = name.partition(":")
+    if vision.class_speed(name) is not None or kind == vision.VARIABLE_DISPLAY:
+      return 0
+    if kind == "other_sign" and not value.startswith(NOT_SIGNS):
+      return 1
+    return None
+
+  return channel
+
+
+class BoxInputs:
+  """A group of boxes: where what a network found is in the picture and how big, as the network gives it. The picture is
+  cut in BOX_COLUMNS columns; for each channel and column, the tallest box whose centre is in the column: its width and
+  its height over the frame's, its centre y over the frame's height; 0, 0, 0 with none. Then, for the group, known (1
+  once a box was given) and the age of the last reading that had one.
+
+  add() each frame read, in order, on the car right after read_signs; row() at a step. The columns are those of the last
+  reading given, held until the next: a step may come without a new reading. A reading with no box empties them; known
+  and the age keep the memory.
+
+  channels: how many the group has; channel: what gives the channel of a class, None for a class the group does not take
+  (sign_box_channel for sign_boxes). Nothing here knows what a channel holds: another group of boxes is this class with
+  other channels."""
+
+  def __init__(self, vision, channels: int, channel):
+    self._vision = vision
+    self._channel = channel
+    self._columns = np.zeros((channels, BOX_COLUMNS, BOX_NUMBERS), dtype=np.float32)
+    self._seen_at: float | None = None
+
+  def add(self, now: float, boxes: list, width: float, height: float) -> None:
+    """boxes: (class, confidence, (x1, y1, x2, y2)) of a frame, the corners in the pixels of a frame width x height.
+    Only the ones read sure enough (vision.MIN_CONFIDENCE), as SignInputs.add; of a box, its part inside the frame."""
+    self._columns[:] = 0.0
+    tallest: dict = {}  # (channel, column): the height of its box
+    for name, confidence, box in boxes:
+      channel = self._channel(name)
+      if channel is None or confidence < self._vision.MIN_CONFIDENCE:
+        continue
+      left, right = (min(max(float(x), 0.0), width) for x in (box[0], box[2]))
+      top, bottom = (min(max(float(y), 0.0), height) for y in (box[1], box[3]))
+      if right <= left or bottom <= top:
+        continue
+      column = min(int((left + right) / 2 / width * BOX_COLUMNS), BOX_COLUMNS - 1)
+      tall = (bottom - top) / height
+      if tall > tallest.get((channel, column), 0.0):
+        tallest[channel, column] = tall
+        self._columns[channel, column] = (right - left) / width, tall, (top + bottom) / 2 / height
+    if tallest:
+      self._seen_at = now
+
+  def row(self, now: float) -> np.ndarray:
+    """Channel after channel, its columns from the left, of each the width, the height and the centre y of its box; then
+    known and the age of the last reading with a box, as a sign's age."""
+    row = np.zeros(self._columns.size + 2, dtype=np.float32)
+    row[:-2] = self._columns.ravel()
+    if self._seen_at is not None:
+      row[-2:] = 1.0, math.log1p(max(now - self._seen_at, 0.0)) / SIGN_AGE_SCALE
     return row
 
 

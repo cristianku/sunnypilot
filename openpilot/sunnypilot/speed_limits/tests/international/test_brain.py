@@ -10,6 +10,7 @@ from openpilot.sunnypilot.speed_limits import brain, brain_inputs
 
 GROUPS = ['signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed']
 SIZE = sum(brain_inputs.INPUT_SIZES[name] for name in GROUPS)
+BOX = [10.0, 4.0, 20.0, 14.0]  # of a sign, in the pixels of the 64 x 32 frames below
 
 
 def contract(**changes):
@@ -84,7 +85,7 @@ def test_the_groups_go_in_side_by_side(reader):
 
 def test_a_sign_read_reaches_the_network(reader):
   for at in (0.0, 0.2, 0.4, 0.6):
-    reader.add_signs(at, [{'class': 'maximum_speed:80', 'confidence': 0.99}])
+    reader.add_signs(at, [{'class': 'maximum_speed:80', 'confidence': 0.99, 'box': BOX}])
   reader.step(1.0, *frame(), None, None, None, None)
   assert reader.signs.number == 80
   assert reader.network.calls[0][1][0, 0] == pytest.approx(80 / brain_inputs.SIGN_KPH_SCALE)
@@ -92,7 +93,7 @@ def test_a_sign_read_reaches_the_network(reader):
 
 def read_hours(reader):
   for at in (0.0, 0.2, 0.4, 0.6):
-    reader.add_signs(at, [{'class': 'maximum_speed_hours:30', 'confidence': 0.99}])
+    reader.add_signs(at, [{'class': 'maximum_speed_hours:30', 'confidence': 0.99, 'box': BOX}])
 
 
 def unknown_plate():
@@ -102,7 +103,7 @@ def unknown_plate():
 def test_a_brain_trained_without_plates_gets_no_plate(reader, monkeypatch):
   seen = []
   monkeypatch.setattr(reader.signs, 'add', lambda now, signs: seen.append(signs))
-  reader.add_signs(0.0, [{'class': 'maximum_speed_hours:30', 'confidence': 0.99}])
+  reader.add_signs(0.0, [{'class': 'maximum_speed_hours:30', 'confidence': 0.99, 'box': BOX}])
   assert seen == [[('maximum_speed_hours:30', 0.99)]]
 
 
@@ -125,13 +126,13 @@ def test_a_brain_trained_with_plates_gets_the_plate(vision):
 def test_a_brain_trained_with_plates_gets_none_from_a_plain_number(vision):
   reader = brain.BrainReader(Network(), contract(step=contract()['step'] | {'plates': True}), vision, 64, 32)
   for at in (0.0, 0.2, 0.4, 0.6):
-    reader.add_signs(at, [{'class': 'maximum_speed:30', 'confidence': 0.99}])
+    reader.add_signs(at, [{'class': 'maximum_speed:30', 'confidence': 0.99, 'box': BOX}])
   assert np.array_equal(reader.signs.plate_row(), unknown_plate())
 
 
 def read_wet(reader):
   for at in (0.0, 0.2):
-    reader.add_signs(at, [{'class': 'maximum_speed_wet:80', 'confidence': 0.99}])
+    reader.add_signs(at, [{'class': 'maximum_speed_wet:80', 'confidence': 0.99, 'box': BOX}])
 
 
 def test_a_brain_trained_with_wet_plates_gets_them(vision):
@@ -159,7 +160,7 @@ def test_a_brain_trained_with_wet_plates_and_no_hours_plates_takes_a_number_with
 
 def read_with_hours(reader):
   for at in (0.0, 0.2, 0.4, 0.6):
-    reader.add_signs(at, [{'class': 'maximum_speed_hours:30:22-6', 'confidence': 0.99}])
+    reader.add_signs(at, [{'class': 'maximum_speed_hours:30:22-6', 'confidence': 0.99, 'box': BOX}])
 
 
 def test_a_brain_trained_with_hours_gets_them(vision):
@@ -326,6 +327,51 @@ def test_it_says_the_road_type_for_the_screen(vision):
 def test_a_brain_without_the_road_type_says_none(reader):
   reader.step(0.0, *frame(), None, None, None, None, 0.0)
   assert reader.road_type == ""
+
+
+BOX_GROUPS = [*GROUPS, 'sign_boxes']
+
+
+def boxed(vision, width, height):
+  """A brain trained with the boxes of the signs, on frames of width x height."""
+  step = {'rate_hz': 4.0, 'groups': BOX_GROUPS, 'memory_gap_seconds': 5.0, 'clock': 'schedule', 'picture': 'brain'}
+  return brain.BrainReader(Network(), contract(step=step), vision, width, height)
+
+
+def big_frame(width, height):
+  return np.zeros((height, width), dtype=np.uint8), np.full((height // 2, width), 128, dtype=np.uint8)
+
+
+@pytest.mark.parametrize('width, height', [(1344, 760), (2688, 1520)])
+def test_a_brain_trained_with_the_boxes_gets_where_each_sign_is_and_how_big(vision, width, height):
+  reader = boxed(vision, width, height)
+  scale = width / 1344
+  signs = [{'class': 'maximum_speed:80', 'confidence': 0.99, 'box': [x * scale for x in (1008.0, 190.0, 1050.0, 232.0)]},
+           {'class': 'other_sign:give_way', 'confidence': 0.9, 'box': [x * scale for x in (84.0, 304.0, 168.0, 380.0)]},
+           {'class': 'maximum_speed:60', 'confidence': 0.4, 'box': [x * scale for x in (500.0, 100.0, 540.0, 140.0)]}]
+  reader.add_signs(0.0, signs)
+  reader.step(0.0, *big_frame(width, height), None, None, None, None)
+  size = brain_inputs.INPUT_SIZES['sign_boxes']
+  assert size == 50
+  row = reader.network.calls[0][1][0, -size:]
+  grid = row[:-2].reshape(brain_inputs.SIGN_BOX_CHANNELS, brain_inputs.BOX_COLUMNS, brain_inputs.BOX_NUMBERS)
+  # The number in the seventh column of the speed signs, the give way in the first of the other signs, the unsure one
+  # nowhere: the same fractions of the frame whatever its definition
+  assert grid[0, 6] == pytest.approx([42 / 1344, 42 / 760, 211 / 760])
+  assert grid[1, 0] == pytest.approx([84 / 1344, 76 / 760, 342 / 760])
+  assert np.count_nonzero(grid) == 6 and list(row[-2:]) == [1.0, 0.0]
+  # The next reading has no sign: the columns empty, the memory of the last one stays
+  reader.add_signs(0.25, [])
+  reader.step(0.25, *big_frame(width, height), None, None, None, None)
+  row = reader.network.calls[1][1][0, -size:]
+  assert not row[:-2].any() and row[-2] == 1 and row[-1] == pytest.approx(np.log1p(0.25) / brain_inputs.SIGN_AGE_SCALE)
+
+
+def test_a_brain_trained_without_the_boxes_gets_what_it_got(reader):
+  # The published brain's groups have no sign_boxes: a sign with its box changes nothing of what goes in
+  reader.add_signs(0.0, [{'class': 'other_sign:stop', 'confidence': 0.99, 'box': BOX}])
+  reader.step(0.0, *frame(), None, None, None, None)
+  assert reader.network.calls[0][1].shape == (1, SIZE)
 
 
 def test_the_sign_distance_row():

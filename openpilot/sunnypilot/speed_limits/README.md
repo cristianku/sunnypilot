@@ -68,7 +68,8 @@ until then, and the Smartspeed mode sets 6 by itself.
 
 When the release has a `brain` (`speed_limits.json`, `brain.onnx`), it is the vision limit: Smartspeed is the one
 choice in sunnylink and the resolver does not change. `brain.BrainReader` steps with the frame, what `brain_inputs.py`
-makes of the signs read, the metres to the sign ahead (`vision.SignDistance`), the car ahead (`radarState`), the local hour
+makes of the signs read, their boxes (or, for a brain trained until 11 Nov 2026, the metres to the sign ahead,
+`vision.SignDistance`), the car ahead (`radarState`), the local hour
 and the country from GPS, gas, brake and the car's speed (`carState`), and whether openpilot is engaged, how long ago it went
 off and whether the brake, the gas or something else turned it off (`selfdriveState`). The speed it says is
 `speedLimit`, with `speedLimitReason` "brain". The rules of `SpeedLimitMemory`, the road-type network and `LimitAhead` do not run
@@ -84,7 +85,14 @@ The contract's `step` says how it steps, and a contract without these keys is th
   frame in RGB; `"brain"` is `vision.BrainInput`, the same size, the luma and chroma scaled first and only then turned to RGB,
   about 5 ms instead of 23 ms on a 1344 x 760 frame, so that it can run at every reading. The server makes the training
   pictures with the same class.
-- `groups`: a brain trained with `sign_distance` gets the metres to the sign ahead, clipped at 200 m, 0 for none.
+- `groups`: a brain trained with `sign_distance` gets the metres to the sign ahead, clipped at 200 m, 0 for none. No
+  brain is trained with them since 12 Nov 2026: no metres worked out by a formula go into the brain. One trained with
+  `sign_boxes` gets the boxes of the signs of the last frame read as SignNet gave them (`brain_inputs.BoxInputs`): the
+  frame cut in 8 columns and, for the speed signs and for the other signs, the tallest box of each column as its width,
+  its height and the height of its centre over the frame's, then whether a sign was ever seen and how long ago the last
+  one. Only signs read sure enough and not of another road; the boxes are in the pixels of the frame SignNet reads, also
+  when the classifier's crops come from the full definition. The class takes other channels as they are: another group
+  of boxes needs no change to it.
 
 The speed is all the car reads from a brain. A brain trained until 12 Nov 2026 also has the outputs `next` (the next limit)
 and `metres` (the metres to it): it loads and steps as any other, and the two are not read. With a brain `speedLimitAhead`

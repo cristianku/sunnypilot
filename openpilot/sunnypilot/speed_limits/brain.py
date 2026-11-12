@@ -42,8 +42,10 @@ class BrainReader:
     self.memory_gap = contract["step"]["memory_gap_seconds"]
     pictures = {"road_type": vision.RoadTypeInput, "brain": vision.BrainInput}
     self.image = pictures[contract["step"].get("picture", "road_type")](width, height)
+    self.width, self.height = width, height  # of the frames given to step(): the pixels of the signs' boxes
     self.road_types = contract["output"].get("road_types", [])
     self.signs = brain_inputs.SignInputs(vision)
+    self.sign_boxes = brain_inputs.BoxInputs(vision, brain_inputs.SIGN_BOX_CHANNELS, brain_inputs.sign_box_channel(vision))
     self.class_plate = vision.class_plate
     self.plates = {plate for plate, trained in (("time", contract["step"].get("plates", False)),
                                                 ("wet", contract["step"].get("wet", False))) if trained}
@@ -60,7 +62,9 @@ class BrainReader:
   def add_signs(self, now: float, signs: list[dict]) -> None:
     """A frame's signs as vision.read_signs gives them. A plate only to a brain trained with that kind of plate, and their
     hours only to one trained with hours (its contract's step): to another one, trained with them unknown on every frame,
-    they would change the speed at random."""
+    they would change the speed at random. Their boxes go as SignNet gave them (sign_boxes), in the pixels of the frame
+    it read: the low one, also when the classifier's crops come from the full definition."""
+    self.sign_boxes.add(now, [(sign["class"], sign["confidence"], sign["box"]) for sign in signs], self.width, self.height)
     if not self.plates:
       self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
     else:
@@ -112,7 +116,7 @@ class BrainReader:
             "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego),
             "plate_wet": self.signs.plate_wet_row(), "engaged": self.engaged.row(now),
             "sign_distance": brain_inputs.sign_distance_row(sign_distance), "motion": self.motion.row(now),
-            "road_signs": self.signs.road_signs_row(now)}
+            "road_signs": self.signs.road_signs_row(now), "sign_boxes": self.sign_boxes.row(now)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
