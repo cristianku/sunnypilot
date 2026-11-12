@@ -1,6 +1,7 @@
 import pytest
 
-from openpilot.selfdrive.ui.sunnypilot.mici.onroad.sign_reading import ROAD_SIGNS, distance_text, reading_text, square_and_road
+from openpilot.selfdrive.ui.sunnypilot.mici.onroad.sign_reading import PULSE_SECONDS, ROAD_SIGNS, blink, reading_text, sign_ahead, \
+  square_and_road
 from openpilot.sunnypilot.speed_limits import vision
 
 
@@ -31,13 +32,19 @@ def test_every_road_sign_a_reading_can_be_has_a_name():
   assert set(ROAD_SIGNS) == set(vision.ROAD_SIGNS)
 
 
-@pytest.mark.parametrize('metres, metric, shown', [
-  (0., True, ""),
-  (0.4, True, ""),
-  (42.4, True, "42 m"),
-  (142., True, "142 m"),
-  (30.48, False, "100 ft"),
-  (0., False, ""),
+@pytest.mark.parametrize('seen, metres, ahead', [
+  (True, 40., True),  # in view
+  (True, 0., True),  # in view, a sign whose size is not known: no metres
+  (False, 12., True),  # out of the picture, not passed yet
+  (False, 0., False),  # passed: the zero
 ])
-def test_the_square_says_the_distance_to_the_sign(metres, metric, shown):
-  assert distance_text(metres, metric) == shown
+def test_a_sign_is_ahead_from_the_first_sight_to_the_zero(seen, metres, ahead):
+  assert sign_ahead(seen, metres) is ahead
+
+
+def test_the_square_blinks_while_a_sign_is_ahead_and_stands_still_after():
+  assert blink(None, 5.) == 0.
+  assert blink(5., 5.) == 0. and blink(5., 5. + PULSE_SECONDS / 2) == pytest.approx(1.)
+  # It goes on, pulse after pulse, as long as the sign is ahead
+  assert blink(5., 5. + 7 * PULSE_SECONDS + PULSE_SECONDS / 2) == pytest.approx(1.)
+  assert all(0. <= blink(5., 5. + step * 0.05) <= 1. for step in range(100))

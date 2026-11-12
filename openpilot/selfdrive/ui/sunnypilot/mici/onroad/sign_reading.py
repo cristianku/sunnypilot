@@ -8,7 +8,6 @@ import math
 
 import pyray as rl
 
-from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.vision_speed_limit import READING_SIZE, ROUNDNESS, SEGMENTS, BORDER, \
   DARK_GREY, GREY, reading_box
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -31,16 +30,16 @@ ROAD_SIGNS = {
 # TEXT_WIDTH (MWY, TOWN).
 FONT_SIZES = {1: 28, 2: 28, 3: 26, 4: 22}
 TEXT_WIDTH = READING_SIZE - 2 * (BORDER + 4)
-# Three lines, by where the middle of their capitals and digits goes from the top of the square: the confidence, the
-# sign read, the distance to the sign.
+# Two lines, by where the middle of their capitals and digits goes from the top of the square: the confidence and the
+# sign read. No metres: the distance to a sign is not shown (12 Nov 2026).
 SMALL_FONT_SIZE = 16
-CONFIDENCE_MIDDLE = 14
-TEXT_MIDDLE = 36
-DISTANCE_MIDDLE = 58
+CONFIDENCE_MIDDLE = 17
+TEXT_MIDDLE = 44
 CAP_MIDDLE = 0.63  # of the line height, Inter's: the middle of its capitals and digits
 CROSS = 3  # the line through a road sign's end
-# A sign read (signRead, the same limit again too) makes the square pulse: it grows by PULSE_GROW of its side and back
-# in PULSE_SECONDS, its border white, so the driver sees the network has read it; soundd beeps at the same moment.
+# While a sign is ahead the square blinks: it grows by PULSE_GROW of its side and back every PULSE_SECONDS, its border
+# white, from the moment the network sees the sign to the moment the car passes it (the zero), for debugging: the driver
+# sees when the network picked the sign up and when it let it go. soundd still beeps when a sign is read (signRead).
 PULSE_SECONDS = 0.6
 PULSE_GROW = 0.18
 # Red, the ring of a round sign, while the sign is in view.
@@ -76,24 +75,31 @@ def square_and_road(sign_class: str, value: float, confidence: float,
   return (text, crossed, f"{round(confidence * 100)}%" if text else ""), ("", False)
 
 
-def distance_text(metres: float, metric: bool) -> str:
-  """The distance to the sign ahead (speedVisionSP.signDistance), in m, or in ft without metric units; "" without a
-  sign ahead."""
-  shown, unit = (round(metres), "m") if metric else (round(metres * CV.METER_TO_FOOT), "ft")
-  return f"{shown} {unit}" if shown > 0 else ""
+def sign_ahead(seen: bool, metres: float) -> bool:
+  """Whether a sign is ahead: in view now (speedVisionSP.rawSignSeen), or seen and not passed yet (signDistance over 0:
+  speedvisiond counts it down to the sign with the metres driven, and it is 0 once the car is at the sign). The metres
+  only end the blinking; they are not shown."""
+  return bool(seen) or metres > 0
+
+
+def blink(since: float | None, now: float) -> float:
+  """How far the square is into a pulse, 0 to 1: 0 without a sign ahead (since None), else a pulse every PULSE_SECONDS
+  from the moment the sign was first ahead."""
+  if since is None or now < since:
+    return 0.
+  return math.sin(math.pi * ((now - since) % PULSE_SECONDS) / PULSE_SECONDS)
 
 
 class SignReading(Widget):
   """The sign reader's square, under the vision square and as big, for the driver to see the sign reader work apart
   from the speed the vision square shows: the last limit the classifier read (speedVisionSP.rawSign*) as it was read
   (its number as written, END), with the classifier's confidence on top,
-  sure enough or not, whatever the memory or the brain made of it, and at the bottom the distance to the sign ahead
-  (signDistance, from its size on the camera and the metres driven) while there is one. Its border is red while that
-  sign is in view (rawSignSeen) and grey once it is passed, as the reading stays until another sign is read. A road sign
-  read (its short name, crossed out at its end) goes in a small box under the square, red too while in view, until the
-  next sign is read, and leaves the limit in the square (square_and_road). It pulses
-  on every sign read (signRead, the same limit again too), with soundd's beep. A dash before the first sign or without
-  speedvisiond. Drawn under the vision square, so the pulse slides under it; the drawing changes nothing."""
+  sure enough or not, whatever the memory or the brain made of it. Its border is red while that sign is in view
+  (rawSignSeen) and grey once it is passed, as the reading stays until another sign is read. A road sign read (its short
+  name, crossed out at its end) goes in a small box under the square, red too while in view, until the next sign is
+  read, and leaves the limit in the square (square_and_road). It blinks from the moment the network sees a sign until
+  the car passes it (sign_ahead, blink), then stands still; soundd beeps on every sign read. No metres are shown. A
+  dash before the first sign or without speedvisiond. All of it is for debugging and is to go. Drawn under the vision square, so the pulse slides under it; the drawing changes nothing."""
   def __init__(self):
     super().__init__()
     self._font: rl.Font = gui_app.font(FontWeight.BOLD)
@@ -102,9 +108,8 @@ class SignReading(Widget):
     self._confidence: str = ""
     self._road: str = ""
     self._road_crossed: bool = False
-    self._distance: str = ""
     self._seen: bool = False
-    self._pulse_at: float = -math.inf
+    self._ahead_since: float | None = None
 
   def _update_state(self) -> None:
     sm = ui_state.sm
@@ -116,9 +121,10 @@ class SignReading(Widget):
     else:
       self._text, self._crossed, self._confidence, self._road, self._road_crossed = "", False, "", "", False
     self._seen = alive and vision.rawSignSeen
-    self._distance = distance_text(vision.signDistance, ui_state.is_metric) if alive else ""
-    if alive and sm.updated['speedVisionSP'] and vision.signRead:
-      self._pulse_at = rl.get_time()
+    if not (alive and sign_ahead(vision.rawSignSeen, vision.signDistance)):
+      self._ahead_since = None
+    elif self._ahead_since is None:
+      self._ahead_since = rl.get_time()
 
   def _draw_line(self, box: rl.Rectangle, text: str, font_size: float, middle: float, color: rl.Color,
                  crossed: bool = False) -> None:
@@ -138,8 +144,7 @@ class SignReading(Widget):
       return
 
     box = reading_box(rect, ui_state.speed_limit_final_display)
-    since = rl.get_time() - self._pulse_at
-    pulse = math.sin(math.pi * since / PULSE_SECONDS) if 0 <= since < PULSE_SECONDS else 0.
+    pulse = blink(self._ahead_since, rl.get_time())
     if pulse > 0:
       grow = READING_SIZE * PULSE_GROW * pulse
       outer = rl.Rectangle(box.x - grow / 2, box.y - grow / 2, READING_SIZE + grow, READING_SIZE + grow)
@@ -156,9 +161,6 @@ class SignReading(Widget):
     color = rl.WHITE if self._text else GREY
     if self._confidence:
       self._draw_line(box, self._confidence, SMALL_FONT_SIZE, CONFIDENCE_MIDDLE, color)
-    # The distance to the sign, m or ft, for the driver to check
-    if self._distance:
-      self._draw_line(box, self._distance, SMALL_FONT_SIZE, DISTANCE_MIDDLE, rl.WHITE)
 
     text = self._text or "-"
     self._draw_line(box, text, FONT_SIZES.get(len(text), FONT_SIZES[4]), TEXT_MIDDLE, color, self._crossed)
