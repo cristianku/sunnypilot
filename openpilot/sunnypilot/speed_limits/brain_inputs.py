@@ -36,6 +36,9 @@ The groups, each one apart so that a comparison can leave it out:
 - motion: the car's own turn signals, steering wheel and yaw (MotionInputs): a blinker on in the last BLINKER_SECONDS and
   how long ago it was last on, left and right; the steering angle; the yaw rate (deviceMotion, the car's yawRate when the
   device gives none); each known. A turn signal before an exit or a junction says the limit is about to change.
+- road_signs: every other sign the classifier reads (ROAD_SIGNS, all the kinds of other_sign, none picked out): for each,
+  whether one was confirmed (2 readings within CONFIRM_SECONDS, the numbers' own rule) and the age of its last reading
+  since. Stop, give way, a crossing, a roundabout, a town or a motorway: the network weighs what each says.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -44,6 +47,14 @@ import numpy as np
 
 COUNTRIES = ("CH", "DE", "FR", "IT", "AT", "US")
 PLATES = ("none", "time", "other")  # below a number: none, hours written on it, anything else
+# Every kind of other_sign the classifier can read (the server's sign_types.SIGN_TYPES, checked equal by its tests)
+ROAD_SIGNS = ("pedestrian_crossing", "children", "cyclists", "traffic_queue", "roadworks", "danger_other",
+              "give_way", "stop", "priority_to_right", "main_road", "main_road_end",
+              "no_overtaking", "no_overtaking_end", "no_entry", "no_vehicles", "minimum_speed", "weight_limit",
+              "height_limit", "width_limit", "keep_right", "keep_left", "ahead_only",
+              "town_entry", "town_exit", "motorway_start", "motorway_end", "expressway_start", "expressway_end",
+              "roundabout", "one_way", "direction_left", "direction_right", "direction_straight", "direction_several",
+              "motorway_direction", "motorway_exit", "other")
 SIGN_KPH_SCALE = 130.0
 SIGN_AGE_SCALE = math.log1p(3600.0)
 LEAD_METRES_SCALE = 100.0
@@ -69,10 +80,11 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244",
                "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7",
                "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0",
-               "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d")
+               "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d",
+               "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629")
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
-               "motion": 8}
+               "motion": 8, "road_signs": 2 * len(ROAD_SIGNS)}
 
 
 class SignInputs:
@@ -86,10 +98,21 @@ class SignInputs:
     self._hours: dict = {}  # number: (when, (from, to)) of its last reading with hours: one without them takes nothing away
     self.number, self.kind, self.read_at, self.ended, self.plate, self.hours = None, "", None, False, None, None
     self.single, self.single_at = None, None
+    self._road_read: dict = {}  # kind: its last reading
+    self._road_seen: dict = {}  # kind: its last reading once confirmed
 
   def add(self, now: float, signs: list) -> None:
     """signs: (class, confidence), (class, confidence, plate) or (class, confidence, plate, (from, to)) of a frame. Of a
     number read twice in it, the surest."""
+    kinds = set()
+    for name, confidence, *_ in signs:
+      family, _, kind = name.partition(":")
+      if family == "other_sign" and kind in ROAD_SIGNS and confidence >= self._vision.MIN_CONFIDENCE:
+        kinds.add(kind)
+    for kind in kinds:
+      if now - self._road_read.get(kind, -math.inf) <= self._vision.CONFIRM_SECONDS:
+        self._road_seen[kind] = now
+      self._road_read[kind] = now
     read: dict = {}
     for name, confidence, *said in signs:
       value = self._vision.class_speed(name)
@@ -127,6 +150,14 @@ class SignInputs:
                  self.kind == "road_marking", math.log1p(age) / SIGN_AGE_SCALE, self.ended, age < 1)
     if self.single is not None:
       row[8:] = self.single / SIGN_KPH_SCALE, 1.0, math.log1p(now - self.single_at) / SIGN_AGE_SCALE
+    return row
+
+  def road_signs_row(self, now: float) -> np.ndarray:
+    """For each of ROAD_SIGNS: confirmed, and the age of its last reading since; 0, 0 for one never confirmed."""
+    row = np.zeros(INPUT_SIZES["road_signs"], dtype=np.float32)
+    for at, kind in enumerate(ROAD_SIGNS):
+      if kind in self._road_seen:
+        row[2 * at:2 * at + 2] = 1.0, math.log1p(max(now - self._road_seen[kind], 0.0)) / SIGN_AGE_SCALE
     return row
 
   def plate_row(self) -> np.ndarray:

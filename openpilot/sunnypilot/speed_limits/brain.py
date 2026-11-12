@@ -111,7 +111,8 @@ class BrainReader:
             "lead": brain_inputs.lead_row(metres, kph), "country": brain_inputs.country_row(country),
             "pedals": self.pedals.row(now), "speed": brain_inputs.speed_row(v_ego),
             "plate_wet": self.signs.plate_wet_row(), "engaged": self.engaged.row(now),
-            "sign_distance": brain_inputs.sign_distance_row(sign_distance), "motion": self.motion.row(now)}
+            "sign_distance": brain_inputs.sign_distance_row(sign_distance), "motion": self.motion.row(now),
+            "road_signs": self.signs.road_signs_row(now)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
