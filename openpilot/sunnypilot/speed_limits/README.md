@@ -92,7 +92,8 @@ The contract's `step` says how it steps, and a contract without these keys is th
   its height and the height of its centre over the frame's, then whether a sign was ever seen and how long ago the last
   one. Only signs read sure enough and not of another road; the boxes are in the pixels of the frame SignNet reads, also
   when the classifier's crops come from the full definition. The class takes other channels as they are: another group
-  of boxes needs no change to it.
+  of boxes needs no change to it. One trained with `light_boxes` gets the traffic lights the same way, a channel for each
+  of red, amber, green and off (`light_box_channel`).
 
 The speed is all the car reads from a brain. A brain trained until 12 Nov 2026 also has the outputs `next` (the next limit)
 and `metres` (the metres to it): it loads and steps as any other, and the two are not read. With a brain `speedLimitAhead`

@@ -44,6 +44,9 @@ The groups, each one apart so that a comparison can leave it out:
   with no metres worked out: the picture cut in BOX_COLUMNS columns and, for the speed signs and for the other signs
   (sign_box_channel), the tallest box of each column; then whether a sign was ever seen and the age of the last one. A
   sign grows and moves to the side as the car nears it: what that means for the speed the network learns.
+- light_boxes: where the traffic lights of the last frame read are in the picture and how big, the same BoxInputs with a
+  channel for each of LIGHTS (light_box_channel): the tallest light of each column by what it has lit, then whether a light
+  was ever seen and the age of the last one. A red light near and in front is not one far to the side.
 """
 from datetime import datetime, timedelta, timezone
 import math
@@ -74,6 +77,7 @@ SIGN_METRES_MAX = 200.0
 BOX_COLUMNS = 8  # a group of boxes (BoxInputs) cuts the picture in so many columns, left to right
 BOX_NUMBERS = 3  # of a box: its width and its height over the frame's, its centre y over the frame's height
 SIGN_BOX_CHANNELS = 2  # of sign_boxes (sign_box_channel): a speed sign or the end of a limit, any other sign
+LIGHTS = ("red", "amber", "green", "off")  # the channels of light_boxes (light_box_channel): what a traffic light has lit
 NOT_SIGNS = ("traffic_light_", "road_user_")  # the kinds of other_sign that are no signs: a light, who is on the road
 SPEED_MAX = 60.0  # m/s
 SPEED_SCALE = 30.0
@@ -95,7 +99,8 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7",
                "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0",
                "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d",
-               "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629")
+               "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629",
+               "d7016ace080049d8b8ae75119dd8f2f3b80634ebd417e5e4c8a99bcc4fdc4cd0")
 
 
 def box_size(channels: int) -> int:
@@ -105,7 +110,8 @@ def box_size(channels: int) -> int:
 
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
-               "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS)}
+               "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS),
+               "light_boxes": box_size(len(LIGHTS))}
 
 
 class SignInputs:
@@ -216,6 +222,15 @@ def sign_box_channel(vision):
   return channel
 
 
+def light_box_channel(name: str) -> int | None:
+  """The channel of light_boxes for a class of the classifier: the place in LIGHTS of what a traffic light has lit
+  (other_sign:traffic_light_red is 0), None for every other class."""
+  kind, _, value = name.partition(":")
+  if kind == "other_sign" and value.startswith("traffic_light_") and value[len("traffic_light_"):] in LIGHTS:
+    return LIGHTS.index(value[len("traffic_light_"):])
+  return None
+
+
 class BoxInputs:
   """A group of boxes: where what a network found is in the picture and how big, as the network gives it. The picture is
   cut in BOX_COLUMNS columns; for each channel and column, the tallest box whose centre is in the column: its width and
@@ -227,7 +242,7 @@ class BoxInputs:
   and the age keep the memory.
 
   channels: how many the group has; channel: what gives the channel of a class, None for a class the group does not take
-  (sign_box_channel for sign_boxes). Nothing here knows what a channel holds: another group of boxes is this class with
+  (sign_box_channel for sign_boxes, light_box_channel for light_boxes). Nothing here knows what a channel holds: another group of boxes is this class with
   other channels."""
 
   def __init__(self, vision, channels: int, channel):
