@@ -101,10 +101,12 @@ class BrainReader:
     return now - self.last_step >= self.period
 
   def step(self, now: float, y: np.ndarray, uv: np.ndarray, lead: tuple[float, float] | None, unix_seconds: float | None,
-           country: str | None, v_ego: float | None, sign_distance: float = 0.0) -> float:
+           country: str | None, v_ego: float | None, sign_distance: float = 0.0,
+           position: tuple[float, float] | None = None) -> float:
     """lead: metres and km/h of the car ahead, None without one; unix_seconds: the GPS clock now, None before a fix; country:
     the last one GPS gave, None before the first; v_ego: the car's speed (m/s), None before the first carState;
-    sign_distance: vision.SignDistance's metres to the sign ahead, 0 without one."""
+    sign_distance: vision.SignDistance's metres to the sign ahead, 0 without one; position: latitude and longitude of the
+    last valid fix, None before it (the time zone of hour_tz in a country of several)."""
     if now - self.last_step > self.memory_gap:
       self.hidden = np.zeros_like(self.hidden)
     self.last_step = now
@@ -120,7 +122,8 @@ class BrainReader:
             "plate_wet": self.signs.plate_wet_row(), "engaged": self.engaged.row(now),
             "sign_distance": brain_inputs.sign_distance_row(sign_distance), "motion": self.motion.row(now),
             "road_signs": self.signs.road_signs_row(now), "sign_boxes": self.sign_boxes.row(now),
-            "light_boxes": self.light_boxes.row(now)}
+            "light_boxes": self.light_boxes.row(now), "country_iso": brain_inputs.country_iso_row(country),
+            "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz")}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6

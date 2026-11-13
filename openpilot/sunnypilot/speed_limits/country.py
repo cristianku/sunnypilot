@@ -68,9 +68,22 @@ def _distance(lon, lat, a, b):
   return math.hypot(ax + t * dx, ay + t * dy)
 
 
+def _bbox(ring):
+  lons, lats = [p[0] for p in ring], [p[1] for p in ring]
+  return min(lons), min(lats), max(lons), max(lats)
+
+
 class OfflineBorders:
+  """The borders, in tiers: a country of tier 1 (outside Europe, coarser) is asked only where no country of tier 0 is."""
   def __init__(self, countries):
     self.countries = countries
+    self._boxes = {}
+
+  def _box(self, polygon):
+    box = self._boxes.get(id(polygon))
+    if box is None:
+      box = self._boxes[id(polygon)] = _bbox(polygon[0])
+    return box
 
   @classmethod
   def load(cls, path=None):
@@ -85,6 +98,8 @@ class OfflineBorders:
           raise ValueError('invalid country code')
         if len(c['bbox']) != 4 or not all(type(x) in (int, float) and math.isfinite(x) for x in c['bbox']):
           raise ValueError('invalid bbox')
+        if c.get('tier', 0) not in (0, 1):
+          raise ValueError('invalid tier')
         if not c['polygons']:
           raise ValueError('empty geometry')
         for polygon in c['polygons']:
@@ -100,19 +115,25 @@ class OfflineBorders:
   def country_at(self, lat, lon, margin_m):
     if not all(type(v) in (int, float) and math.isfinite(v) for v in (lat, lon, margin_m)) or not -90 <= lat <= 90 or not -180 <= lon <= 180 or margin_m < 0:
       return None
-    matches = []
-    for c in self.countries:
-      x0, y0, x1, y1 = c['bbox']
-      if not x0 <= lon <= x1 or not y0 <= lat <= y1:
-        continue
-      for polygon in c['polygons']:
-        if not _inside(lon, lat, polygon[0]) or any(_inside(lon, lat, hole) for hole in polygon[1:]):
+    for tier in sorted({c.get('tier', 0) for c in self.countries}):
+      matches = set()
+      for c in self.countries:
+        x0, y0, x1, y1 = c['bbox']
+        if c.get('tier', 0) != tier or not x0 <= lon <= x1 or not y0 <= lat <= y1:
           continue
-        if any(_distance(lon, lat, a, b) <= margin_m for ring in polygon for a, b in zip(ring, ring[1:] + ring[:1], strict=True)):
-          return None
-        matches.append(c['code'])
-        break
-    return matches[0] if len(matches) == 1 else None
+        for polygon in c['polygons']:
+          px0, py0, px1, py1 = self._box(polygon)
+          if not px0 <= lon <= px1 or not py0 <= lat <= py1:
+            continue
+          if not _inside(lon, lat, polygon[0]) or any(_inside(lon, lat, hole) for hole in polygon[1:]):
+            continue
+          if any(_distance(lon, lat, a, b) <= margin_m for ring in polygon for a, b in zip(ring, ring[1:] + ring[:1], strict=True)):
+            return None
+          matches.add(c['code'])
+          break
+      if matches:
+        return matches.pop() if len(matches) == 1 else None
+    return None
 
 
 class CountryResolver:

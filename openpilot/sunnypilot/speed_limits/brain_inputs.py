@@ -24,7 +24,12 @@ The groups, each one apart so that a comparison can leave it out:
 - hour: the local hour, on a circle, so that a limit of some hours can be told from the rest. The network decides, no code
   turns a plate and an hour into a limit;
 - lead: distance and speed of the car ahead;
-- country: the last one GPS gave, none before the first;
+- country: the last one GPS gave, none before the first, one of COUNTRIES only. Only for the brains trained until 13 Nov
+  2026 (the server's LEFT_OUT since): country_iso takes every country of the world;
+- country_iso: the same country among every ISO 3166-1 code (COUNTRY_CODES), none before the first;
+- hour_tz: the local hour, as hour, from the real time zones of the whole world (zone_hour: the zone of the country nearest
+  to the last fix, summer time included). hour knows only the countries of WINTER_UTC_HOURS and is kept only for the
+  brains trained until 13 Nov 2026 (the server's LEFT_OUT since);
 - pedals: gas and brake pressed at some moment of the last second, as carState says them;
 - speed: the car's own speed.
 - engaged: whether openpilot is engaged (selfdriveState.enabled), how long ago it last went off and what turned it off. A
@@ -48,12 +53,28 @@ The groups, each one apart so that a comparison can leave it out:
   channel for each of LIGHTS (light_box_channel): the tallest light of each column by what it has lit, then whether a light
   was ever seen and the age of the last one. A red light near and in front is not one far to the side.
 """
+from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
+import gzip
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 
 COUNTRIES = ("CH", "DE", "FR", "IT", "AT", "US")
+# Every country of the world (country_iso): ISO 3166-1 alpha-2 as tzdata's iso3166.tab lists it, and Kosovo (XK), which the
+# borders give. The order is fixed: a published brain learned each place; a new code goes at the end.
+COUNTRY_CODES = tuple("""
+  AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG
+  CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL
+  GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA
+  LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP
+  NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV
+  SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW
+""".split())
+# The time zones of hour_tz, made by the server's scripts/make_time_zones.py from tzdata (public domain).
+TIME_ZONES = Path(__file__).with_name("time-zones.json.gz")
 PLATES = ("none", "time", "other")  # below a number: none, hours written on it, anything else
 # Every kind of other_sign the classifier can read (the server's sign_types.SIGN_TYPES, checked equal by its tests)
 ROAD_SIGNS = ("pedestrian_crossing", "children", "cyclists", "traffic_queue", "roadworks", "danger_other",
@@ -100,7 +121,8 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "3406d6ab17f201aac62e37521393f42d1cfd2d319b6f89a21d59ee38ad056aa0",
                "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d",
                "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629",
-               "d7016ace080049d8b8ae75119dd8f2f3b80634ebd417e5e4c8a99bcc4fdc4cd0")
+               "d7016ace080049d8b8ae75119dd8f2f3b80634ebd417e5e4c8a99bcc4fdc4cd0",
+               "c12716e61d873c3a34510ae58747ec3af934e17fc3e0344fa7945bca5cec8d36")
 
 
 def box_size(channels: int) -> int:
@@ -111,7 +133,7 @@ def box_size(channels: int) -> int:
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
                "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS),
-               "light_boxes": box_size(len(LIGHTS))}
+               "light_boxes": box_size(len(LIGHTS)), "country_iso": len(COUNTRY_CODES) + 1, "hour_tz": 3}
 
 
 class SignInputs:
@@ -300,9 +322,43 @@ def local_hour(unix_seconds: float | None, country: str | None) -> float | None:
   return (offset + _summer_time(moment) + (unix_seconds % 86400) / 3600) % 24
 
 
-def hour_row(hour: float | None) -> np.ndarray:
-  """The hour on a circle, so that a minute to midnight is next to midnight, known."""
-  row = np.zeros(INPUT_SIZES["hour"], dtype=np.float32)
+_zones: dict | None = None
+
+
+def _time_zones() -> dict:
+  """TIME_ZONES by country: [(latitude, longitude, starts, offsets in minutes)]; none without the file."""
+  global _zones
+  if _zones is None:
+    _zones = {}
+    try:
+      for zone in json.loads(gzip.decompress(TIME_ZONES.read_bytes()))["zones"]:
+        starts, minutes = zip(*zone["offsets"], strict=True)
+        for code in zone["countries"]:
+          _zones.setdefault(code, []).append((*zone["position"], starts, minutes))
+    except (OSError, ValueError, KeyError, TypeError, EOFError):
+      _zones = {}
+  return _zones
+
+
+def zone_hour(unix_seconds: float | None, country: str | None, position: tuple[float, float] | None = None) -> float | None:
+  """The hour of the day, 0 to 24 with its fraction, in the time zone of the country nearest to position (the last fix:
+  latitude, longitude). A country of one zone needs no position. None: no time from GPS yet, no country, or a country of
+  several zones and no position."""
+  zones = _time_zones().get(country)
+  if unix_seconds is None or not zones or (len(zones) > 1 and position is None):
+    return None
+  if len(zones) > 1:
+    latitude, longitude = position
+    scale = math.cos(math.radians(latitude))
+    zones = [min(zones, key=lambda z: (z[0] - latitude) ** 2 + (((z[1] - longitude + 180) % 360 - 180) * scale) ** 2)]
+  _, _, starts, minutes = zones[0]
+  offset = minutes[max(bisect_right(starts, unix_seconds) - 1, 0)]
+  return ((unix_seconds + offset * 60) % 86400) / 3600
+
+
+def hour_row(hour: float | None, group: str = "hour") -> np.ndarray:
+  """The hour on a circle, so that a minute to midnight is next to midnight, known. group: hour or hour_tz."""
+  row = np.zeros(INPUT_SIZES[group], dtype=np.float32)
   if hour is not None:
     row[:] = math.sin(2 * math.pi * hour / 24), math.cos(2 * math.pi * hour / 24), 1.0
   return row
@@ -321,6 +377,13 @@ def sign_distance_row(metres: float) -> np.ndarray:
   row = np.zeros(INPUT_SIZES["sign_distance"], dtype=np.float32)
   if metres > 0:
     row[:] = min(metres, SIGN_METRES_MAX) / SIGN_METRES_SCALE, 1.0
+  return row
+
+
+def country_iso_row(name: str | None) -> np.ndarray:
+  """One of COUNTRY_CODES, the last place for none (and for a code it does not know)."""
+  row = np.zeros(INPUT_SIZES["country_iso"], dtype=np.float32)
+  row[COUNTRY_CODES.index(name) if name in COUNTRY_CODES else len(COUNTRY_CODES)] = 1.0
   return row
 
 

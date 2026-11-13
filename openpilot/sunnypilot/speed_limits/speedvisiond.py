@@ -160,6 +160,7 @@ def main() -> None:
   params = Params()
   settings_country = params.get("OsmLocationName") or "CH"
   gps_country: str | None = None
+  gps_position: tuple[float, float] | None = None  # of the last valid fix: the brain's time zone (hour_tz)
   memory = vision.SpeedLimitMemory(settings_country)
   gps_service = get_gps_location_service(params)
   gps = messaging.sub_sock(gps_service, conflate=True)
@@ -208,6 +209,8 @@ def main() -> None:
       g = getattr(event, gps_service)
       fix = GpsFix(event.logMonoTime * 1e-9, g.latitude, g.longitude, g.horizontalAccuracy,
                    bool(event.valid and g.hasFix))
+      if fix.valid:
+        gps_position = fix.latitude, fix.longitude
       if fix.valid and g.unixTimestampMillis:
         gps_clock = g.unixTimestampMillis / 1000, now
     gps_country = (country.update(now, fix) if country is not None else None) or gps_country
@@ -229,7 +232,7 @@ def main() -> None:
       if reader.due(now):
         # Right after SignNet, while the GPU is still free of the driving model.
         unix = gps_clock[0] + now - gps_clock[1] if gps_clock is not None else None
-        reader.step(now, y, uv, lead, unix, gps_country, v_ego, sign_distance)
+        reader.step(now, y, uv, lead, unix, gps_country, v_ego, sign_distance, gps_position)
       if raw is not None:
         memory.note_raw(raw)
         # Given to the brain: read sure enough and not of another road.
