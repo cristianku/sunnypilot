@@ -146,6 +146,22 @@ full one into the new stream, sent first, the low one where it always was. So th
 another debayer, no vignetting correction, about 7 ms later. It costs about 250 MB of memory. With both switches off
 the road camera stays on the IFE.
 
+## One loop, on the car and over a recorded drive
+
+`pipeline.py` holds what `speedvisiond` does between its sockets and the message it sends. `SpeedVision` takes every
+carState, selfdriveState, deviceMotion, radarState and GPS message and every frame read, and gives the fields of
+`speedVisionSP`. `speedvisiond` keeps the sockets, the camera and the device's networks around it.
+
+sunnypilot.speedlimits runs the same class over a recorded drive, with the frames of its video and the messages of its
+log, to show on its site what the comma's screen would show with a set of networks. So the module imports only numpy
+and the modules of this package that need nothing else. `pipeline.release(directory)` reads a release from any
+directory; `runner.networks()` is that for `models/`.
+
+The map's limit is the one thing of the map that enters here, and only for a brain trained with it as an input (its
+contract names the group `map_limit`; Cristian, 14 Nov 2026): `speedvisiond` gives every `liveMapDataSP` to
+`SpeedVision.map_limit`, which hands its limit to the brain, unknown after 3 s without one. A brain trained without it
+takes nothing of it, and neither the rules nor any other network read the map.
+
 ## Tests in this checkout
 
 From the repository root, with the project's Python 3.12 test environment:

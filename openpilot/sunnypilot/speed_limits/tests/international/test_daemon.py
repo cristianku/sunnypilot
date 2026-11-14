@@ -1,5 +1,8 @@
-"""Run speedvisiond.main with simulated camera/network/socket I/O; no inference."""
+"""Run speedvisiond.main with simulated camera/network/socket I/O; no inference. What it does between its sockets is
+pipeline.SpeedVision, run here with the same simulated vision."""
 
+import json
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import pytest
@@ -74,6 +77,11 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
   v.SignNetInput = lambda *args: None
   v.read_signs = lambda *args: signs if clock.now >= signs_from else []
   b = country.OfflineBorders([{'code': 'GB', 'bbox': [0, -1, 1, 1], 'polygons': [[[[0, -1], [1, -1], [1, 1], [0, 1], [0, -1]]]]}])
+  rules = NS(**{**execute(candidate / 'openpilot/sunnypilot/speed_limits/applicability.py', {'np': np}), 'Applicability': ruler})
+  pipeline = NS(**execute(candidate / 'openpilot/sunnypilot/speed_limits/pipeline.py', {
+    'json': json, 'Path': Path, 'SimpleNamespace': NS, 'np': np, 'vision': v, 'applicability': rules,
+    'CountryResolver': country.CountryResolver, 'OfflineBorders': NS(load=lambda: b), 'GpsFix': country.GpsFix,
+    '__name__': 'units_pipeline'}))
   env = {
     'os': NS(nice=lambda _: None, environ={}),
     'time': NS(monotonic=lambda: clock.now, sleep=sleep),
@@ -89,10 +97,8 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
     'vision': v,
     'runner': NS(networks=lambda: files, Network=lambda _: None, compile_network=lambda p: p, StepNetwork=lambda p: None),
     'brain': NS(BrainReader=reader),
-    'applicability': NS(**{**execute(candidate / 'openpilot/sunnypilot/speed_limits/applicability.py', {'np': np}),
-                           'Applicability': ruler}),
-    'CountryResolver': country.CountryResolver,
-    'OfflineBorders': NS(load=lambda: b),
+    'applicability': rules,
+    'pipeline': pipeline,
     'GpsFix': country.GpsFix,
     '__name__': 'units_daemon',
   }

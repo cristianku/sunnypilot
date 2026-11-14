@@ -10,7 +10,6 @@ speedvisiond when they are still missing; never failing the build: a network tha
 without a reading, never the build or openpilot without its driving model.
 """
 import hashlib
-import json
 import os
 import subprocess
 import sys
@@ -22,10 +21,10 @@ import numpy as np
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.hardware import AGNOS
 from openpilot.common.hardware.hw import Paths
+from openpilot.sunnypilot.speed_limits.pipeline import MANIFEST_FORMAT, Networks, release  # noqa: F401
 
 MODELS_DIR = Path(__file__).parent / "models"
 MANIFEST = MODELS_DIR / "speed_limits.json"
-MANIFEST_FORMAT = 2
 TINYGRAD = Path(BASEDIR) / "tinygrad_repo"
 COMPILER = TINYGRAD / "examples" / "openpilot" / "compile_onnx.py"
 # The flags SConscript compiles the driving model with.
@@ -38,47 +37,9 @@ else:
 STALE_PARTIAL_SECONDS = 3600
 
 
-class Networks:
-  """The files of the networks: SignNet (finder), the classifier and its classes, the name of the release; the road
-  type network and its classes when the release has one (road_type, optional in format 2); the brain and its contract
-  when the release has one (brain, optional in format 2: it is the limit then); the applicability network and its
-  contract when the release has one (decider, optional in format 2: the signs of another road are not taken); the
-  settings of the vision limit (settings, optional: vision.apply_settings)."""
-  def __init__(self, manifest: dict):
-    self.name = f"speed-limits {manifest['version']}"
-    self.settings: dict = manifest.get("settings") if isinstance(manifest.get("settings"), dict) else {}
-    self.finder = MODELS_DIR / manifest["finder"]["file"]
-    self.classifier = MODELS_DIR / manifest["classifier"]["file"]
-    contract = json.loads((MODELS_DIR / manifest["classifier"]["contract"]).read_text())
-    self.classes: list[str] = contract["output"]["classes"]
-    self.road_type: Path | None = None
-    self.road_types: list[str] = []
-    if "road_type" in manifest:
-      self.road_type = MODELS_DIR / manifest["road_type"]["file"]
-      self.road_types = json.loads((MODELS_DIR / manifest["road_type"]["contract"]).read_text())["output"]["classes"]
-    self.brain: Path | None = None
-    self.brain_contract: dict = {}
-    if "brain" in manifest:
-      self.brain = MODELS_DIR / manifest["brain"]["file"]
-      self.brain_contract = json.loads((MODELS_DIR / manifest["brain"]["contract"]).read_text())
-    self.decider: Path | None = None
-    self.decider_contract: dict = {}
-    if "decider" in manifest:
-      self.decider = MODELS_DIR / manifest["decider"]["file"]
-      self.decider_contract = json.loads((MODELS_DIR / manifest["decider"]["contract"]).read_text())
-
-  def onnx(self) -> list[Path]:
-    """Every network of the release, the road type's, the brain's and the applicability's too."""
-    return [self.finder, self.classifier] + [path for path in (self.road_type, self.brain, self.decider) if path]
-
-
 def networks() -> Networks | None:
   """The networks of the models repository, None when it has none (an older format, no model yet)."""
-  try:
-    manifest = json.loads(MANIFEST.read_text())
-    return Networks(manifest) if manifest.get("format") == MANIFEST_FORMAT else None
-  except (OSError, ValueError, KeyError, TypeError):
-    return None
+  return release(MODELS_DIR)
 
 
 def compiled_path(onnx: Path) -> Path:
