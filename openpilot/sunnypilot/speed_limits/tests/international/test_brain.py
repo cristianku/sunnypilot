@@ -59,6 +59,34 @@ def test_refuses_a_network_asking_for_what_the_car_does_not_give(vision):
     brain.BrainReader(Network(), wrong, vision, 64, 32)
 
 
+def map_reader(vision):
+  step = contract()['step'] | {'groups': [*GROUPS, 'map_limit']}
+  return brain.BrainReader(Network(), contract(step=step), vision, 64, 32)
+
+
+def test_a_brain_trained_with_the_map_gets_its_limit(vision):
+  """Cristian, 14 Nov 2026: the map's limit is an input only of a brain trained with it (the group map_limit)."""
+  reader = map_reader(vision)
+  size = brain_inputs.INPUT_SIZES['map_limit']
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert not reader.network.calls[-1][1][0, -size:].any()  # the map has said nothing yet
+  reader.add_map_limit(1.5, 80 / 3.6, True)
+  reader.step(2.0, *frame(), None, None, None, None)
+  assert np.allclose(reader.network.calls[-1][1][0, -size:], [80 / brain_inputs.SIGN_KPH_SCALE, 1.0])
+  reader.add_map_limit(2.5, 80 / 3.6, False)  # the map has no limit here
+  reader.step(3.0, *frame(), None, None, None, None)
+  assert not reader.network.calls[-1][1][0, -size:].any()
+  reader.add_map_limit(3.5, 50 / 3.6, True)
+  reader.step(3.5 + brain_inputs.MAP_SECONDS + 1.0, *frame(), None, None, None, None)
+  assert not reader.network.calls[-1][1][0, -size:].any()  # not heard for too long
+
+
+def test_a_brain_trained_without_the_map_never_takes_it(reader):
+  reader.add_map_limit(0.5, 80 / 3.6, True)
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert reader.network.calls[0][1].shape == (1, SIZE) and not reader.map.row(1.0).any()
+
+
 def test_says_the_class_in_metres_per_second(reader):
   assert reader.speed_limit == 0.0
   assert reader.step(1.0, *frame(), None, None, None, None) == pytest.approx(15 / 3.6)

@@ -4,7 +4,8 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE READS THE MAP (liveMapDataSP).
+VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE READS THE MAP (liveMapDataSP), EXCEPT FOR A BRAIN TRAINED WITH THE MAP'S
+LIMIT AS AN INPUT (ITS GROUP map_limit, CRISTIAN 14 NOV 2026): add_map_limit() GIVES IT TO THAT BRAIN ONLY.
 
 The brain: the network with memory that says the speed to hold. It is the limit of the vision side when the release has
 one: no rule of vision.SpeedLimitMemory and no road-type network decides then. What the reader read goes in as an input
@@ -58,6 +59,8 @@ class BrainReader:
     self.next_step = -math.inf
     self.pedals = brain_inputs.PedalInputs()
     self.engaged = brain_inputs.EngagedInputs()
+    self.map = brain_inputs.MapInputs()
+    self.wants_map = "map_limit" in self.groups  # only such a brain is ever given the map's limit
     self.motion = brain_inputs.MotionInputs()
 
   def add_signs(self, now: float, signs: list[dict]) -> None:
@@ -95,6 +98,12 @@ class BrainReader:
     """Every selfdriveState, after the carStates that came before it."""
     self.engaged.add_enabled(now, enabled)
 
+  def add_map_limit(self, now: float, metres_per_second: float, valid: bool) -> None:
+    """Every liveMapDataSP (speedLimit, speedLimitValid), for a brain trained with the map's limit (wants_map): any other
+    brain takes nothing of it."""
+    if self.wants_map:
+      self.map.add(now, metres_per_second, valid)
+
   def due(self, now: float) -> bool:
     if self.schedule:
       return now >= self.next_step
@@ -123,7 +132,8 @@ class BrainReader:
             "sign_distance": brain_inputs.sign_distance_row(sign_distance), "motion": self.motion.row(now),
             "road_signs": self.signs.road_signs_row(now), "sign_boxes": self.sign_boxes.row(now),
             "light_boxes": self.light_boxes.row(now), "country_iso": brain_inputs.country_iso_row(country),
-            "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz")}
+            "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz"),
+            "map_limit": self.map.row(now)}
     outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6

@@ -4,8 +4,10 @@ Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 
-VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE READS THE MAP (liveMapDataSP). THE BRAIN'S INPUTS COME FROM THE CAMERA
-AND THE CAR'S OWN SIGNALS ONLY; THE COUNTRY IS THE ONLY THING GPS GIVES, AS IT DOES TO THE SIGNS' UNIT.
+VISION AND MAP ARE TWO SEPARATE SOURCES: THE BRAIN'S INPUTS COME FROM THE CAMERA AND THE CAR'S OWN SIGNALS ONLY; THE COUNTRY
+IS THE ONLY THING GPS GIVES, AS IT DOES TO THE SIGNS' UNIT. ONE EXCEPTION, CHOSEN PER BRAIN (CRISTIAN, 14 NOV 2026): THE
+GROUP map_limit, THE MAP'S LIMIT (liveMapDataSP), WHICH ONLY A BRAIN TRAINED WITH IT IS GIVEN (Train › Brain's switch, off by
+default). NOTHING ELSE HERE READS THE MAP, AND NO OTHER BRAIN EVER GETS IT.
 
 What the brain is given beside the picture, frame by frame, all from what comes at or before the frame. One file for the
 car and for the training: the server loads this very file by its path (numpy only, nothing of openpilot), so that what the
@@ -52,6 +54,9 @@ The groups, each one apart so that a comparison can leave it out:
 - light_boxes: where the traffic lights of the last frame read are in the picture and how big, the same BoxInputs with a
   channel for each of LIGHTS (light_box_channel): the tallest light of each column by what it has lit, then whether a light
   was ever seen and the age of the last one. A red light near and in front is not one far to the side.
+- map_limit: the limit the map gives where the car is (liveMapDataSP.speedLimit while speedLimitValid), known; unknown where
+  the map has none or has said nothing for MAP_SECONDS (MapInputs). Never learned unless the training is asked for it
+  (the server's OPTIONAL): the brain then weighs it with what it sees, no code picks between the two.
 """
 from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
@@ -110,6 +115,7 @@ YAW_SCALE, YAW_MAX = 30.0, 3.0  # deg/s, left positive
 MOTION_SECONDS = 1.0  # a signal not heard for longer is unknown
 CAR_YAW_MIN = 1e-4  # rad/s: a car whose yawRate stays 0 has no sensor behind it
 MEMORY_GAP_SECONDS = 5.0  # longer without a frame: its memory starts again from zeros
+MAP_SECONDS = 3.0  # the map speaks once a second (liveMapDataSP): not heard for longer, its limit is unknown
 # The hours from UTC in winter, of the countries with the EU's summer time. Arithmetic on UTC: a comma may have no time zones.
 WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
 # The earlier files of this one a published brain may have been trained with: since each of them groups were only added, so
@@ -122,7 +128,8 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d",
                "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629",
                "d7016ace080049d8b8ae75119dd8f2f3b80634ebd417e5e4c8a99bcc4fdc4cd0",
-               "c12716e61d873c3a34510ae58747ec3af934e17fc3e0344fa7945bca5cec8d36")
+               "c12716e61d873c3a34510ae58747ec3af934e17fc3e0344fa7945bca5cec8d36",
+               "29960dec1c4fcadfd718ca158d1fdfdb6d051e1d19015546cacadc1644211801")
 
 
 def box_size(channels: int) -> int:
@@ -133,7 +140,7 @@ def box_size(channels: int) -> int:
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
                "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS),
-               "light_boxes": box_size(len(LIGHTS)), "country_iso": len(COUNTRY_CODES) + 1, "hour_tz": 3}
+               "light_boxes": box_size(len(LIGHTS)), "country_iso": len(COUNTRY_CODES) + 1, "hour_tz": 3, "map_limit": 2}
 
 
 class SignInputs:
@@ -512,6 +519,30 @@ class MotionInputs:
       return row
     row[5], row[6] = np.clip(yaw / YAW_SCALE, -YAW_MAX, YAW_MAX), 1.0
     return row
+
+
+def map_limit_row(kph: float | None) -> np.ndarray:
+  """The map's limit / SIGN_KPH_SCALE, known; zeros where the map has none."""
+  row = np.zeros(INPUT_SIZES["map_limit"], dtype=np.float32)
+  if kph is not None and kph > 0:
+    row[:] = kph / SIGN_KPH_SCALE, 1.0
+  return row
+
+
+class MapInputs:
+  """The map_limit group on the car: add() every liveMapDataSP, row() at a moment after them."""
+
+  def __init__(self):
+    self._kph: float | None = None
+    self._at = -math.inf
+
+  def add(self, now: float, metres_per_second: float, valid: bool) -> None:
+    """liveMapDataSP.speedLimit (m/s) and speedLimitValid."""
+    self._kph = metres_per_second * 3.6 if valid and metres_per_second > 0 else None
+    self._at = now
+
+  def row(self, now: float) -> np.ndarray:
+    return map_limit_row(self._kph if now - self._at <= MAP_SECONDS else None)
 
 
 def speed_row(metres_per_second: float | None) -> np.ndarray:
