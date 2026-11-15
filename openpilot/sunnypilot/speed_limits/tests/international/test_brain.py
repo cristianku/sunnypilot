@@ -395,6 +395,42 @@ def test_a_brain_trained_with_the_boxes_gets_where_each_sign_is_and_how_big(visi
   assert not row[:-2].any() and row[-2] == 1 and row[-1] == pytest.approx(np.log1p(0.25) / brain_inputs.SIGN_AGE_SCALE)
 
 
+def speed_columns(reader, call=0):
+  """The columns of sign_boxes with a speed sign in them, of a step."""
+  size = brain_inputs.INPUT_SIZES['sign_boxes']
+  grid = reader.network.calls[call][1][0, -size:-2].reshape(brain_inputs.SIGN_BOX_CHANNELS, brain_inputs.BOX_COLUMNS,
+                                                             brain_inputs.BOX_NUMBERS)
+  return [column for column in range(brain_inputs.BOX_COLUMNS) if grid[0, column].any()]
+
+
+OURS = {'class': 'maximum_speed:80', 'confidence': 0.99, 'box': [1008.0, 190.0, 1050.0, 232.0]}
+THEIRS = {'class': 'maximum_speed:40', 'confidence': 0.99, 'box': [84.0, 304.0, 168.0, 380.0], 'road': 'other_road'}
+
+
+def test_a_brain_trained_with_the_boxes_of_every_sign_gets_those_of_another_road_too(vision):
+  """Cristian, 15 Nov 2026: the brain learns whose road a sign is of, so it has to see the signs of another road. Their
+  boxes only: the number in force still comes from the signs the applicability network takes."""
+  step = {'rate_hz': 4.0, 'groups': BOX_GROUPS, 'memory_gap_seconds': 5.0, 'clock': 'schedule', 'picture': 'brain',
+          'other_road_boxes': True}
+  reader = brain.BrainReader(Network(), contract(step=step), vision, 1344, 760)
+  for at in (0.0, 0.25):
+    reader.add_signs(at, [OURS], [OURS, THEIRS])
+  reader.step(0.25, *big_frame(1344, 760), None, None, None, None)
+  assert speed_columns(reader) == [0, 6]
+  assert reader.signs.number == 80 and reader.signs.single == 80  # the 40 of the other road is no reading
+  # Without the signs seen (a release with no applicability network), the ones given are all of them
+  reader.add_signs(0.5, [OURS])
+  reader.step(0.5, *big_frame(1344, 760), None, None, None, None)
+  assert speed_columns(reader, 1) == [6]
+
+
+def test_any_other_brain_keeps_getting_the_boxes_of_the_signs_taken(vision):
+  reader = boxed(vision, 1344, 760)
+  reader.add_signs(0.0, [OURS], [OURS, THEIRS])
+  reader.step(0.0, *big_frame(1344, 760), None, None, None, None)
+  assert speed_columns(reader) == [6]
+
+
 def test_a_brain_trained_without_the_boxes_gets_what_it_got(reader):
   # The published brain's groups have no sign_boxes: a sign with its box changes nothing of what goes in
   reader.add_signs(0.0, [{'class': 'other_sign:stop', 'confidence': 0.99, 'box': BOX}])

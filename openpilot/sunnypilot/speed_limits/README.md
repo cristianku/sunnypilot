@@ -90,7 +90,11 @@ The contract's `step` says how it steps, and a contract without these keys is th
   `sign_boxes` gets the boxes of the signs of the last frame read as SignNet gave them (`brain_inputs.BoxInputs`): the
   frame cut in 8 columns and, for the speed signs and for the other signs, the tallest box of each column as its width,
   its height and the height of its centre over the frame's, then whether a sign was ever seen and how long ago the last
-  one. Only signs read sure enough and not of another road; the boxes are in the pixels of the frame SignNet reads, also
+  one. Only signs read sure enough and not of another road, unless the contract's step has `other_road_boxes`: such a
+  brain was trained with the boxes of every sign read, those the applicability network gives to another road too, and
+  gets them all (the server teaches it whose road a sign is of, `applicability_head`, a head only the training has for
+  now). The number in force (`signs`) still comes from the signs taken, for every brain: the applicability network
+  decides that. The boxes are in the pixels of the frame SignNet reads, also
   when the classifier's crops come from the full definition. The class takes other channels as they are: another group
   of boxes needs no change to it. One trained with `light_boxes` gets the traffic lights the same way, a channel for each
   of red, amber, green and off (`light_box_channel`).

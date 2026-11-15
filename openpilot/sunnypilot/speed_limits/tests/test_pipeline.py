@@ -43,10 +43,11 @@ class Brain:
     self.speed_limit = 0.0
     self.road_type = ""
     self.signs = NS(read_at=None)
-    self.given, self.steps, self.enabled, self.map = [], [], [], []
+    self.given, self.seen, self.steps, self.enabled, self.map = [], [], [], [], []
 
-  def add_signs(self, now, signs):
+  def add_signs(self, now, signs, seen=None):
     self.given.append(signs)
+    self.seen.append(seen)
     if signs:
       self.signs.read_at = now
 
@@ -185,9 +186,18 @@ def test_a_sign_of_another_road_shows_and_is_not_taken(frames):
   speed_vision.frame(1.0, Y, UV)
   sent = speed_vision.frame(1.2, Y, UV)
   assert brain.given == [[], []]
+  # Every sign read reaches the reader beside the ones taken: a brain trained with the boxes of all of them uses these
+  assert [[one["road"] for one in seen] for seen in brain.seen] == [["other_road"], ["other_road"]]
   assert (sent["rawSignClass"], sent["rawSignRoad"], sent["rawSignTaken"], sent["rawSignSeen"]) == \
          ("maximum_speed:50", "other_road", False, True)
   assert [one["road"] for one in speed_vision.signs] == ["other_road"]  # a replay draws its box too
+
+
+def test_without_an_applicability_network_the_signs_taken_are_all_of_them(frames):
+  frames.extend([[sign()]])
+  brain = Brain()
+  pipeline.SpeedVision(files(), WIDTH, HEIGHT, 1141.5, None, None, reader=brain).frame(1.0, Y, UV)
+  assert brain.given == brain.seen == [[sign()]]
 
 
 def test_the_road_type_network_only_without_a_brain(frames):

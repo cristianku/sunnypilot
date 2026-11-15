@@ -82,7 +82,9 @@ class SpeedVision:
   finder, classifier: SignNet and the classifier, the network's input in and its output out. reader: the brain
   (brain.BrainReader) when the release has one: it is the limit then, and neither the memory's rules nor the road-type
   network run. road_types: the road-type network (vision.RoadTypeReader), without a brain only. ruler: the applicability
-  network (applicability.Applicability), None for a release without it: every sign is taken. settings_country: the
+  network (applicability.Applicability), None for a release without it: every sign is taken. With it a sign of another
+  road is left out of the limit and of the brain's number in force; its box still goes to a brain trained with the boxes
+  of every sign read (BrainReader.add_signs). settings_country: the
   country until GPS gives one. country: None without borders or a country policy in the release's settings.
 
   Every time is in seconds on one clock, the one of the frames: the car's messages take the time of the frame they
@@ -177,7 +179,8 @@ class SpeedVision:
       signs = applicability.taken(signs)
     out = SimpleNamespace()
     if reader is not None:
-      reader.add_signs(now, signs)
+      # The signs taken, and all of them: a brain trained with the boxes of every sign read takes those from seen
+      reader.add_signs(now, signs, seen)
       sign_distance = distance.update(now, signs, None)
       if reader.due(now):
         # Right after SignNet, while the GPU is still free of the driving model.

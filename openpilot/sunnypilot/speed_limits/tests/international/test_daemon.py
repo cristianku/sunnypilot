@@ -142,8 +142,8 @@ class FakeBrain:
     self.signs = NS(read_at=None)
     FakeBrain.last = self
 
-  def add_signs(self, now, signs):
-    self.seen.append(signs)
+  def add_signs(self, now, signs, seen=None):
+    self.seen.append(signs)  # the signs taken; seen, all of them, is for a brain trained with every sign's box
     self.signs.read_at = now
 
   def due(self, now):

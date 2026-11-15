@@ -8,8 +8,9 @@ VISION AND MAP ARE TWO SEPARATE SOURCES: NOTHING HERE READS THE MAP (liveMapData
 
 The applicability network (the decider of sunnypilot.speedlimits): whom each speed sign read applies to, our road
 (own_road), another road (other_road: a side street, an exit, the lane beside) or unsure (unresolved, it abstains). A
-sign of another road is not taken: speedvisiond leaves it out of the limit, the memory and the brain's input; the reading
-square still shows it. It rules only the signs of the families it learnt (its contract's ownership_families: the
+sign of another road is not taken: speedvisiond leaves it out of the limit, the memory and the brain's inputs; the reading
+square still shows it. One thing of it still reaches a brain: its box, to a brain trained with the boxes of every sign
+read (brain.BrainReader.add_signs, the contract's step.other_road_boxes), which learns whose road a sign is of. It rules only the signs of the families it learnt (its contract's ownership_families: the
 numbers, their end, the zones, the variable displays, the markings on the road); the others are taken as before.
 
 Its inputs are made as in its training (nnslr_tools.context_experiment.Decider), bit for bit where PIL made them: each box

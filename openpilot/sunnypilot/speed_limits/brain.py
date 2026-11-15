@@ -14,7 +14,10 @@ gives the next limit and the metres to it (outputs next and metres, the brains t
 other and those two are not read. The contract's step says how: its rate, its clock ("last": a step once a period has
 passed since the last one, the first brains, at 1 Hz; "schedule": steps on a fixed grid of that rate, at the reading that
 comes first, as the training's frames are) and its picture ("road_type": vision.RoadTypeInput; "brain":
-vision.BrainInput).
+vision.BrainInput). Its step.other_road_boxes says which signs' boxes it was trained with (sign_boxes): every speed
+sign read, those the applicability network gives to another road too, for a brain that learns whose road a sign is of
+(the server's applicability_head, a head only the training has for now); without it, only the signs taken. The number
+in force (signs) comes from the signs taken for every brain: the applicability network still decides that.
 """
 import hashlib
 import math
@@ -52,6 +55,8 @@ class BrainReader:
     self.plates = {plate for plate, trained in (("time", contract["step"].get("plates", False)),
                                                 ("wet", contract["step"].get("wet", False))) if trained}
     self.class_hours = vision.class_hours if contract["step"].get("hours", False) else lambda name: None
+    # Trained with the boxes of every sign read, those of another road too: only such a brain gets them (sign_boxes)
+    self.other_road_boxes = bool(contract["step"].get("other_road_boxes", False))
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
     self.road_type = ""
@@ -63,13 +68,18 @@ class BrainReader:
     self.wants_map = "map_limit" in self.groups  # only such a brain is ever given the map's limit
     self.motion = brain_inputs.MotionInputs()
 
-  def add_signs(self, now: float, signs: list[dict]) -> None:
-    """A frame's signs as vision.read_signs gives them. A plate only to a brain trained with that kind of plate, and their
+  def add_signs(self, now: float, signs: list[dict], seen: list[dict] | None = None) -> None:
+    """A frame's signs as vision.read_signs gives them, those taken: without the ones the applicability network gave to
+    another road. seen: all of them, the ones of another road too (None: there is no such network, signs is all of them).
+    A plate only to a brain trained with that kind of plate, and their
     hours only to one trained with hours (its contract's step): to another one, trained with them unknown on every frame,
     they would change the speed at random. Their boxes go as SignNet gave them (sign_boxes, light_boxes), in the pixels of the frame
-    it read: the low one, also when the classifier's crops come from the full definition."""
+    it read: the low one, also when the classifier's crops come from the full definition. sign_boxes gets the boxes of
+    seen for a brain trained with them (other_road_boxes), of the signs taken for any other; the number in force, the
+    plates, the other signs confirmed and the lights always come from the signs taken."""
     boxes = [(sign["class"], sign["confidence"], sign["box"]) for sign in signs]
-    self.sign_boxes.add(now, boxes, self.width, self.height)
+    every = [(sign["class"], sign["confidence"], sign["box"]) for sign in seen] if self.other_road_boxes and seen is not None else boxes
+    self.sign_boxes.add(now, every, self.width, self.height)
     self.light_boxes.add(now, boxes, self.width, self.height)
     if not self.plates:
       self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
