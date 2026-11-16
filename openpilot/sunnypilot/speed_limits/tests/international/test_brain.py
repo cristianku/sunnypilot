@@ -255,6 +255,68 @@ def test_a_brain_of_the_first_contracts_steps_as_before(vision):
   assert first.shape == second.shape == (1, SIZE) and np.array_equal(first, second)
 
 
+KINDS_BEFORE = 49  # the kinds of other sign until 16 Nov 2026 (brain_inputs.ROAD_SIGN_KINDS)
+
+
+def road_reader(vision, **step):
+  """A brain that takes only road_signs, with its contract's step changed."""
+  said = contract()
+  said['step'] = {**said['step'], 'groups': ['road_signs'], **step}
+  return brain.BrainReader(Network(), said, vision, 64, 32)
+
+
+def read_merging(reader):
+  """A merging-traffic sign and a stop confirmed (two readings each), then a step: the extra input given."""
+  for now in (0.0, 0.5):
+    reader.add_signs(now, [{'class': 'other_sign:merging_traffic', 'confidence': 0.9, 'box': BOX},
+                           {'class': 'other_sign:stop', 'confidence': 0.9, 'box': BOX}])
+  reader.step(1.0, *frame(), None, None, None, None, 50.0)
+  return reader.network.calls[-1][1]
+
+
+def test_a_kind_is_only_ever_added_at_the_end():
+  assert brain_inputs.ROAD_SIGN_KINDS == KINDS_BEFORE
+  assert brain_inputs.ROAD_SIGNS[KINDS_BEFORE - 1] == 'road_user_other' and brain_inputs.ROAD_SIGNS[36] == 'other'
+  assert brain_inputs.ROAD_SIGNS[KINDS_BEFORE:] == ('merging_traffic',)
+  assert brain_inputs.INPUT_SIZES['road_signs'] == 2 * len(brain_inputs.ROAD_SIGNS)
+  assert brain_inputs.input_sizes(KINDS_BEFORE)['road_signs'] == 98
+  assert brain_inputs.input_sizes() == brain_inputs.INPUT_SIZES
+  for kinds in (0, len(brain_inputs.ROAD_SIGNS) + 1):
+    with pytest.raises(ValueError):
+      brain_inputs.input_sizes(kinds)
+
+
+def test_a_brain_gets_the_kinds_of_road_sign_it_was_trained_with(vision):
+  new = read_merging(road_reader(vision, road_sign_kinds=len(brain_inputs.ROAD_SIGNS)))
+  before = read_merging(road_reader(vision, road_sign_kinds=KINDS_BEFORE))
+  assert new.shape == (1, 2 * len(brain_inputs.ROAD_SIGNS)) and before.shape == (1, 2 * KINDS_BEFORE)
+  # The kinds before keep their numbers bit for bit; the new one is the last two, confirmed and its age
+  assert np.array_equal(new[:, :2 * KINDS_BEFORE], before)
+  stop = 2 * brain_inputs.ROAD_SIGNS.index('stop')
+  assert before[0, stop] == 1.0 and before[0, stop + 1] > 0.0 and before.sum() == pytest.approx(before[0, stop:stop + 2].sum())
+  assert new[0, -2] == 1.0 and new[0, -1] == pytest.approx(before[0, stop + 1])
+
+
+def test_a_brain_of_an_earlier_file_that_does_not_say_gets_the_kinds_there_were(vision):
+  said = contract()
+  said['inputs_sha256'] = brain_inputs.SAME_GROUPS[-1]
+  said['step'] = {**said['step'], 'groups': ['road_signs']}
+  reader = brain.BrainReader(Network(), said, vision, 64, 32)
+  assert read_merging(reader).shape == (1, 2 * KINDS_BEFORE)
+  # The file the brain on the car was trained with (15 Nov 2026) is among them
+  assert '6e1960feffe03ca96cc6db3a884ff9d056a43aafe01c3c03001feebbd1102fb3' in brain_inputs.SAME_GROUPS
+
+
+def test_a_brain_of_this_file_must_say_its_kinds_and_a_number_that_cannot_be_is_refused(vision):
+  with pytest.raises(ValueError, match='how many kinds'):
+    road_reader(vision)
+  for kinds in (0, len(brain_inputs.ROAD_SIGNS) + 1, True, 49.9, '49'):
+    with pytest.raises(ValueError):
+      road_reader(vision, road_sign_kinds=kinds)
+  # A brain without road_signs needs no word about them
+  assert brain.BrainReader(Network(), contract(), vision, 64, 32).sizes == brain_inputs.input_sizes(KINDS_BEFORE)
+
+
 def test_the_published_brain_still_loads(vision):
   published = Path(brain.__file__).parent / 'models' / 'brain.onnx.contract.json'
   if not published.exists():
@@ -264,6 +326,9 @@ def test_the_published_brain_still_loads(vision):
   assert reader.due(0.0)
   # Its network (11 Nov 2026) also gives the next limit and the metres to it: stepped all the same, its speed is the limit
   assert reader.step(0.0, *frame(), None, None, None, None, 50.0) == pytest.approx(said['output']['kph'][2] / 3.6)
+  # And it is given as many numbers as it was trained with, whatever kinds came after it
+  extra = next(item for item in said['inputs'] if item['name'] == 'extra')
+  assert list(reader.network.calls[-1][1].shape) == extra['shape']
 
 
 AHEAD_GROUPS = [*GROUPS, 'sign_distance']

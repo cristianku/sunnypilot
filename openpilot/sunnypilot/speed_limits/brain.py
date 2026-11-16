@@ -17,7 +17,9 @@ comes first, as the training's frames are) and its picture ("road_type": vision.
 vision.BrainInput). Its step.other_road_boxes says which signs' boxes it was trained with (sign_boxes): every speed
 sign read, those the applicability network gives to another road too, for a brain that learns whose road a sign is of
 (the server's applicability_head, a head only the training has for now); without it, only the signs taken. The number
-in force (signs) comes from the signs taken for every brain: the applicability network still decides that.
+in force (signs) comes from the signs taken for every brain: the applicability network still decides that. Its
+step.road_sign_kinds says how many kinds of other sign it was trained with (road_signs): it is given the first so many
+of brain_inputs.ROAD_SIGNS, ROAD_SIGN_KINDS when a brain trained with an earlier file does not say.
 """
 import hashlib
 import math
@@ -39,6 +41,11 @@ class BrainReader:
     self.groups = tuple(contract["step"]["groups"])
     if not set(self.groups) <= set(brain_inputs.INPUT_SIZES):
       raise ValueError(f"the brain asks for inputs the car does not give: {self.groups}")
+    # The kinds of other sign it was trained with: the first so many (input_sizes raises on a number that cannot be)
+    kinds = contract["step"].get("road_sign_kinds")
+    if kinds is None and "road_signs" in self.groups and contract["inputs_sha256"] not in brain_inputs.SAME_GROUPS:
+      raise ValueError("the brain does not say how many kinds of road sign it was trained with")
+    self.sizes = brain_inputs.input_sizes(brain_inputs.ROAD_SIGN_KINDS if kinds is None else kinds)
     self.network = network
     self.kph = contract["output"]["kph"]
     self.period = 1.0 / contract["step"]["rate_hz"]
@@ -144,7 +151,8 @@ class BrainReader:
             "light_boxes": self.light_boxes.row(now), "country_iso": brain_inputs.country_iso_row(country),
             "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz"),
             "map_limit": self.map.row(now)}
-    outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups)[None], hidden=self.hidden)
+    outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups, self.sizes)[None],
+                           hidden=self.hidden)
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
     if "road_type" in outputs:

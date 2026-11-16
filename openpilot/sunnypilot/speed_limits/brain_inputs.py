@@ -46,7 +46,9 @@ The groups, each one apart so that a comparison can leave it out:
   device gives none); each known. A turn signal before an exit or a junction says the limit is about to change.
 - road_signs: every other sign the classifier reads (ROAD_SIGNS, all the kinds of other_sign, none picked out): for each,
   whether one was confirmed (2 readings within CONFIRM_SECONDS, the numbers' own rule) and the age of its last reading
-  since. Stop, give way, a crossing, a roundabout, a town or a motorway: the network weighs what each says.
+  since. Stop, give way, a crossing, a roundabout, a town or a motorway: the network weighs what each says. A kind is
+  only ever added at the end of ROAD_SIGNS, and a brain is given the first kinds it was trained with (its contract's
+  step.road_sign_kinds, ROAD_SIGN_KINDS without it: input_sizes), so a new kind leaves the brains before it as they were.
 - sign_boxes: where the signs of the last frame read are in the picture and how big (BoxInputs), as SignNet's boxes say,
   with no metres worked out: the picture cut in BOX_COLUMNS columns and, for the speed signs and for the other signs
   (sign_box_channel), the tallest box of each column; then whether a sign was ever seen and the age of the last one. A
@@ -93,7 +95,12 @@ ROAD_SIGNS = ("pedestrian_crossing", "children", "cyclists", "traffic_queue", "r
               "traffic_light_red", "traffic_light_amber", "traffic_light_green", "traffic_light_off",
               # Who is on the road, as the classifier reads them
               "road_user_person", "road_user_bicycle", "road_user_motorcycle", "road_user_car", "road_user_truck",
-              "road_user_bus", "road_user_tram", "road_user_other")
+              "road_user_bus", "road_user_tram", "road_user_other",
+              # Added 16 Nov 2026: the danger triangle of a road or a lane that joins ours (where a ramp comes in)
+              "merging_traffic")
+# The kinds of a brain whose contract does not say how many it was trained with (step.road_sign_kinds): those there were
+# until 16 Nov 2026, the first so many of ROAD_SIGNS.
+ROAD_SIGN_KINDS = 49
 SIGN_KPH_SCALE = 130.0
 SIGN_AGE_SCALE = math.log1p(3600.0)
 LEAD_METRES_SCALE = 100.0
@@ -118,9 +125,10 @@ MEMORY_GAP_SECONDS = 5.0  # longer without a frame: its memory starts again from
 MAP_SECONDS = 3.0  # the map speaks once a second (liveMapDataSP): not heard for longer, its limit is unknown
 # The hours from UTC in winter, of the countries with the EU's summer time. Arithmetic on UTC: a comma may have no time zones.
 WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
-# The earlier files of this one a published brain may have been trained with: since each of them groups were only added, so
-# that brain's own groups still give the same numbers. Without this a new group would leave the car with no vision limit at
-# all until a new brain is published. A change to what a group gives takes the hashes out of here.
+# The earlier files of this one a published brain may have been trained with: since each of them groups were only added, or
+# road_signs grew at its end (a brain is given the kinds it was trained with, input_sizes), so that brain's own groups
+# still give the same numbers. Without this a new group or a new kind would leave the car with no vision limit at all
+# until a new brain is published. Any other change to what a group gives takes the hashes out of here.
 SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467",
                "1147b4ecbc7b9d9334ee29af5afb74c24a49c3aa2bc6f6eeb299754ce11f4244",
                "4b982cdaf22df69a9030229b6acfa7dee6bbab4c6a04857b19aadbb78d4fc4a7",
@@ -129,7 +137,8 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "0d309056a32e48037e804302916398b71d4edd4fc765a62ea4906957d2d7e629",
                "d7016ace080049d8b8ae75119dd8f2f3b80634ebd417e5e4c8a99bcc4fdc4cd0",
                "c12716e61d873c3a34510ae58747ec3af934e17fc3e0344fa7945bca5cec8d36",
-               "29960dec1c4fcadfd718ca158d1fdfdb6d051e1d19015546cacadc1644211801")
+               "29960dec1c4fcadfd718ca158d1fdfdb6d051e1d19015546cacadc1644211801",
+               "6e1960feffe03ca96cc6db3a884ff9d056a43aafe01c3c03001feebbd1102fb3")
 
 
 def box_size(channels: int) -> int:
@@ -553,6 +562,17 @@ def speed_row(metres_per_second: float | None) -> np.ndarray:
   return row
 
 
-def pack_inputs(inputs: dict, groups: tuple) -> np.ndarray:
-  """The extra input of the network: the groups side by side, in the order the network was trained with."""
-  return np.concatenate([inputs[name] for name in groups], axis=-1)
+def input_sizes(road_sign_kinds: int | None = None) -> dict:
+  """INPUT_SIZES for a brain trained with the first road_sign_kinds of ROAD_SIGNS (None: all of them, a brain of today)."""
+  kinds = len(ROAD_SIGNS) if road_sign_kinds is None else road_sign_kinds
+  if isinstance(kinds, bool) or not isinstance(kinds, int) or not 1 <= kinds <= len(ROAD_SIGNS):
+    raise ValueError(f"a brain has between 1 and {len(ROAD_SIGNS)} kinds of road sign, not {road_sign_kinds}")
+  return {**INPUT_SIZES, "road_signs": 2 * kinds}
+
+
+def pack_inputs(inputs: dict, groups: tuple, sizes: dict | None = None) -> np.ndarray:
+  """The extra input of the network: the groups side by side, in the order the network was trained with. With sizes
+  (input_sizes), each group cut to the first numbers that brain was trained with: its kinds of road sign."""
+  if sizes is None:
+    return np.concatenate([inputs[name] for name in groups], axis=-1)
+  return np.concatenate([inputs[name][..., :sizes[name]] for name in groups], axis=-1)

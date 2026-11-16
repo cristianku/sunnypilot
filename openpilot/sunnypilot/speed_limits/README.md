@@ -98,14 +98,19 @@ The contract's `step` says how it steps, and a contract without these keys is th
   when the classifier's crops come from the full definition. The class takes other channels as they are: another group
   of boxes needs no change to it. One trained with `light_boxes` gets the traffic lights the same way, a channel for each
   of red, amber, green and off (`light_box_channel`).
+- `road_sign_kinds`: how many kinds of other sign the brain was trained with (`road_signs`, two numbers a kind). It gets
+  the first so many of `brain_inputs.ROAD_SIGNS`, where a kind is only ever added at the end; a brain trained with an
+  earlier file that does not say gets the 49 there were until 16 Nov 2026 (`ROAD_SIGN_KINDS`). So a new kind, such as
+  `merging_traffic`, leaves the brains before it as they were, and only a brain trained after it reads it.
 
 The speed is all the car reads from a brain. A brain trained until 12 Nov 2026 also has the outputs `next` (the next limit)
 and `metres` (the metres to it): it loads and steps as any other, and the two are not read. With a brain `speedLimitAhead`
 and `speedLimitAheadDistance` stay 0; a release without one still fills them (`vision.LimitAhead`), and the resolver drives
 to them as to the map's.
 
-The contract holds the sha256 of the `brain_inputs.py` it was trained with (or one in `SAME_GROUPS`): the car refuses another
-one, and speedvisiond then sends nothing, so there is no limit. Without a `brain` the old limit runs as before.
+The contract holds the sha256 of the `brain_inputs.py` it was trained with (or one in `SAME_GROUPS`: an earlier file since
+which groups were only added, or `road_signs` grew at its end): the car refuses another one, and one trained with this
+file's `road_signs` that does not say its `road_sign_kinds`, and speedvisiond then sends nothing, so there is no limit. Without a `brain` the old limit runs as before.
 
 ## A number with hours
 
