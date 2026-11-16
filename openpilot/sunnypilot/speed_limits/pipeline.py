@@ -105,6 +105,7 @@ class SpeedVision:
     self.memory = vision.SpeedLimitMemory(settings_country)
     self.country = CountryResolver.from_settings(OfflineBorders.load(), files.settings.get("country_policy", {}))
     self.memory.garage_known = self.road_types is not None and "garage" in self.road_types.classes
+    # The road-type network's: its step alone drops the old samples, so it is filled only for one (#104)
     self.motion = vision.CarMotion()
     self.distance = vision.SignDistance(focal_length)
     self.limit_ahead = vision.LimitAhead()
@@ -121,7 +122,8 @@ class SpeedVision:
     """Every carState. log_time: the message's own time (logMonoTime, s), for the metres driven."""
     self.v_ego = v_ego
     self.distance.add_speed(log_time, v_ego)
-    self.motion.add_car_state(now, steering_deg, left, right, yaw_rate)
+    if self.road_types is not None:
+      self.motion.add_car_state(now, steering_deg, left, right, yaw_rate)
     if self.reader is not None:
       self.reader.add_pedals(now, gas, brake)
       self.reader.add_car_state(now, steering_deg, left, right, yaw_rate)
@@ -139,7 +141,8 @@ class SpeedVision:
 
   def device_motion(self, now: float, z: float, valid: bool) -> None:
     """Every deviceMotion: angularVelocityDevice.z and its valid flag."""
-    self.motion.add_device_motion(now, z, valid)
+    if self.road_types is not None:
+      self.motion.add_device_motion(now, z, valid)
     if self.reader is not None:
       self.reader.add_device_motion(now, z, valid)
 

@@ -34,6 +34,10 @@ class BrainReader:
   """The network step by step: add_signs() on every frame read, step() when due. The picture is the one of its contract,
   bit for bit the frames of the training. speed_limit is the speed said (m/s), held between the steps, 0 before the first;
   road_type the road type it sees (contract output.road_types), for the screen only, "" for a brain without it.
+  Nothing that is not a finite number stays in its memory (#104): one would stay there at every later step of the drive,
+  with kph[0] as the speed said. A car ahead whose metres or speed are not finite is no car ahead, any other number of
+  the row that is not finite goes in as 0, and a step whose memory or speed comes out not finite says no speed (0) and
+  no road type, the memory from zeros again at the next one.
   Raises ValueError on a network that was trained with another brain_inputs.py or asks for what the car does not give."""
   def __init__(self, network, contract: dict, vision, width: int, height: int):
     if contract["inputs_sha256"] not in (hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest(), *brain_inputs.SAME_GROUPS):
@@ -140,6 +144,8 @@ class BrainReader:
     self.next_step += self.period
     if self.next_step < now:
       self.next_step = now + self.period
+    if lead is not None and not (math.isfinite(lead[0]) and math.isfinite(lead[1])):
+      lead = None  # a car ahead whose numbers are not finite is no car ahead: 0 would be a car at 0 m (#104)
     metres, kph = lead if lead is not None else (None, None)
     rows = {"signs": self.signs.features(now), "plate": self.signs.plate_row(), "plate_hours": self.signs.plate_hours_row(),
             "hour": brain_inputs.hour_row(brain_inputs.local_hour(unix_seconds, country)),
@@ -151,8 +157,15 @@ class BrainReader:
             "light_boxes": self.light_boxes.row(now), "country_iso": brain_inputs.country_iso_row(country),
             "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz"),
             "map_limit": self.map.row(now)}
-    outputs = self.network(image=self.image(y, uv), extra=brain_inputs.pack_inputs(rows, self.groups, self.sizes)[None],
-                           hidden=self.hidden)
+    # A number of the row that is not finite (a NaN steering angle or yaw) goes in as 0; the finite ones as they are, bit
+    # for bit what the training gave (#104)
+    extra = np.nan_to_num(brain_inputs.pack_inputs(rows, self.groups, self.sizes), nan=0.0, posinf=0.0, neginf=0.0)
+    outputs = self.network(image=self.image(y, uv), extra=extra[None], hidden=self.hidden)
+    if not (np.isfinite(outputs["hidden_out"]).all() and np.isfinite(outputs["speed"]).all()):
+      # Not into the memory, where it would stay: this step says no speed, and the next one starts from zeros (#104)
+      self.hidden = np.zeros_like(self.hidden)
+      self.speed_limit, self.road_type = 0.0, ""
+      return self.speed_limit
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
     if "road_type" in outputs:

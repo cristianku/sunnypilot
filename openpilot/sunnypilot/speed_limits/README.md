@@ -108,6 +108,13 @@ and `metres` (the metres to it): it loads and steps as any other, and the two ar
 and `speedLimitAheadDistance` stay 0; a release without one still fills them (`vision.LimitAhead`), and the resolver drives
 to them as to the map's.
 
+Nothing that is not a finite number stays in the brain's memory (sunnypilot.smartspeed #104), where it would be at every
+later step of the drive with `kph[0]`, 1 km/h, as the speed said. A car ahead whose metres or speed are not finite is no
+car ahead, any other number of the `extra` row that is not finite (a NaN steering angle or yaw) goes in as 0, the finite
+ones bit for bit as before; a step whose `hidden_out` or
+`speed` comes out not finite is sent as `speedLimit` 0 with `speedLimitState` "unknown", and the next step starts from a
+memory of zeros.
+
 The contract holds the sha256 of the `brain_inputs.py` it was trained with (or one in `SAME_GROUPS`: an earlier file since
 which groups were only added, or `road_signs` grew at its end): the car refuses another one, and one trained with this
 file's `road_signs` that does not say its `road_sign_kinds`, and speedvisiond then sends nothing, so there is no limit. Without a `brain` the old limit runs as before.

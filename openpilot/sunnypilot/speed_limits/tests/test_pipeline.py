@@ -7,13 +7,15 @@ See the LICENSE.md file in the root directory for more details.
 pipeline.SpeedVision: what speedvisiond does between its sockets, and what a replay of a recorded drive runs. The
 daemon's own behaviour around it is in international/test_daemon.py.
 """
+import hashlib
 import json
+from pathlib import Path
 from types import SimpleNamespace as NS
 
 import numpy as np
 import pytest
 
-from openpilot.sunnypilot.speed_limits import pipeline, vision
+from openpilot.sunnypilot.speed_limits import brain, brain_inputs, pipeline, vision
 from openpilot.sunnypilot.speed_limits.country import GpsFix
 from openpilot.sunnypilot.speed_limits.tests.test_speed_vision_sp import FIELDS
 
@@ -205,3 +207,75 @@ def test_the_road_type_network_only_without_a_brain(frames):
   assert pipeline.SpeedVision(files(), WIDTH, HEIGHT, 0.0, None, None, reader=Brain(), road_types=road_types).road_types is None
   alone = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 0.0, None, None, road_types=road_types)
   assert alone.memory.garage_known and alone.frame(1.0, Y, UV)["roadType"] == "town"
+
+
+def test_the_road_type_networks_motion_is_kept_only_for_it(frames):
+  """(#104) vision.CarMotion drops its old samples only when the road-type network steps. With a brain, or with neither,
+  nothing reads it and it grew for the whole drive, about 57 MB an hour: it is filled only for that network."""
+  def a_second(speed_vision):
+    for n in range(100):  # of carState, and a deviceMotion at every fifth
+      at = 1.0 + n / 100
+      speed_vision.car_state(at, at, 20.0, 90.0, True, False, 0.0, False, False)
+      if n % 5 == 0:
+        speed_vision.device_motion(at, -np.radians(15.0), True)
+    return speed_vision.motion
+
+  reader, got = Brain(), []
+  reader.add_car_state = reader.add_device_motion = lambda *given: got.append(given)
+  for motion in (a_second(pipeline.SpeedVision(files(), WIDTH, HEIGHT, 0.0, None, None, reader=reader)),
+                 a_second(pipeline.SpeedVision(files(), WIDTH, HEIGHT, 0.0, None, None))):
+    assert motion.car == [] and motion.yaw == []
+  assert len(got) == 120  # the brain still gets them all: its own brain_inputs.MotionInputs keeps the last ones only
+  # With a road-type network, what its step is given is what it was, and the step drops the old samples
+  given = []
+  road_types = NS(classes=["town"], due=lambda now: True, road_type="town",
+                  step=lambda now, y, uv, v_ego, sign_age, motion, board_age: given.append(motion))
+  alone = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 0.0, None, None, road_types=road_types)
+  motion = a_second(alone)
+  assert (len(motion.car), len(motion.yaw)) == (100, 20)
+  alone.frame(2.0, Y, UV)
+  assert np.allclose(given[0], [[0.5, 0.5, 1, 0.5, 1, 1, 0, 1]])
+  alone.frame(2.0 + vision.BLINKER_SECONDS, Y, UV)
+  assert motion.car == [] and motion.yaw == [] and not given[1].any()
+
+
+class Memory:
+  """A brain's network whose memory keeps what it is given, as a GRU's does: 80 km/h while it holds numbers, and kph[0],
+  1 km/h, once it holds one that is not finite (np.argmax of NaNs). Its step `overflow` comes out infinite."""
+  def __init__(self, overflow=None):
+    self.steps, self.overflow = 0, overflow
+
+  def input_shape(self, name):
+    return (1, 4)
+
+  def __call__(self, image, extra, hidden):
+    memory = hidden + extra.sum() + (np.float32(np.inf) if self.steps == self.overflow else 0)
+    self.steps += 1
+    speed = np.array([[0.0, 1.0]], dtype=np.float32)
+    return {"speed": speed if np.isfinite(memory).all() else speed * np.nan, "hidden_out": memory}
+
+
+def a_brain(network):
+  """brain.BrainReader as speedvisiond makes it: the car ahead and the car's motion beside the picture, 4 steps a second."""
+  step = {"rate_hz": 4.0, "groups": ["lead", "motion"], "memory_gap_seconds": 5.0, "clock": "schedule", "picture": "brain"}
+  contract = {"inputs_sha256": hashlib.sha256(Path(brain_inputs.__file__).read_bytes()).hexdigest(),
+              "output": {"kph": [1, 80]}, "step": step}
+  return brain.BrainReader(network, contract, vision, WIDTH, HEIGHT)
+
+
+def said(speed_vision, steps):
+  """The limit sent at each of so many steps of the brain, a quarter of a second apart."""
+  sent = [speed_vision.frame(1.0 + n * 0.25, Y, UV) for n in range(steps)]
+  return [(round(one["speedLimit"] * 3.6), one["speedLimitState"], one["speedLimitReason"]) for one in sent]
+
+
+def test_one_number_that_is_not_finite_does_not_stay_in_the_brains_memory(frames):
+  """(#104) The memory starts again only after 5 s without a step, so one NaN in it was there for the rest of the drive,
+  and the car sent 1 km/h as the limit. A NaN from the radar goes in as 0; a step that comes out not finite is sent as
+  no limit (0, "unknown"), and the next one starts from zeros."""
+  speed_vision = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 1141.5, None, None, reader=a_brain(Memory()))
+  speed_vision.radar(True, float("nan"), 10.0)  # leadOne's dRel
+  assert said(speed_vision, 3) == [(80, "limit", "brain")] * 3 and np.isfinite(speed_vision.reader.hidden).all()
+  speed_vision = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 1141.5, None, None, reader=a_brain(Memory(overflow=1)))
+  speed_vision.radar(True, 30.0, 10.0)
+  assert said(speed_vision, 3) == [(80, "limit", "brain"), (0, "unknown", "brain"), (80, "limit", "brain")]

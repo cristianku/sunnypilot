@@ -422,6 +422,84 @@ def test_a_brain_without_the_road_type_says_none(reader):
   assert reader.road_type == ""
 
 
+class Remembering(Network):
+  """A memory that keeps what it is given, as a GRU's does: the numbers beside the picture add up in it, and the speed is
+  read from it. Class 2 (15 km/h) while it holds numbers; with a NaN in it class 0, as np.argmax says of NaNs."""
+  def __call__(self, image, extra, hidden):
+    self.calls.append((image, extra, hidden))
+    memory = hidden + extra.sum()
+    return {'speed': np.array([[0.0, 0.1, 0.9, 0.0]], dtype=np.float32) + 0 * memory, 'hidden_out': memory}
+
+
+def test_a_number_of_the_car_that_is_not_finite_goes_in_as_zero(vision, monkeypatch):
+  """(#104) lead_row and MotionInputs.row pass a NaN on, and the memory would keep it for the rest of the drive, the
+  speed said kph[0]. The finite numbers go in as pack_inputs made them, bit for bit: what the training gave."""
+  packed, spoilt = [], {}
+
+  def pack(*given, made=brain_inputs.pack_inputs):
+    packed.append(made(*given))
+    for at, value in spoilt.items():
+      packed[-1][at] = value
+    return packed[-1]
+
+  monkeypatch.setattr(brain_inputs, 'pack_inputs', pack)
+  step = contract()['step'] | {'groups': [*GROUPS, 'motion']}
+  reader = brain.BrainReader(Remembering(), contract(step=step), vision, 64, 32)
+  reader.add_car_state(0.9, 90.0, True, False, 0.1)
+  reader.add_device_motion(0.9, -0.1, True)
+  reader.step(1.0, *frame(), (30.0, 36.0), 1_770_000_000.0, 'DE', 15.0)
+  given = reader.network.calls[0][1]
+  assert np.isfinite(packed[0]).all() and given.dtype == packed[0].dtype and given[0].tobytes() == packed[0].tobytes()
+  # A car ahead whose metres are a NaN and whose speed is infinite, a NaN steering angle and a NaN yaw
+  reader.add_car_state(1.9, float('nan'), True, False, 0.1)
+  reader.add_device_motion(1.9, float('nan'), True)
+  assert reader.step(2.0, *frame(), (float('nan'), float('inf')), 1_770_000_001.0, 'DE', 15.0) == pytest.approx(15 / 3.6)
+  given, wrong = reader.network.calls[1][1][0], ~np.isfinite(packed[1])
+  assert wrong.any() and not given[wrong].any() and given[~wrong].tobytes() == packed[1][~wrong].tobytes()
+  # Such a car ahead is no car ahead: zeros and not known, where 0 m would be a car at the bumper
+  lead_at = sum(reader.sizes[name] for name in reader.groups[:reader.groups.index('lead')])
+  assert not given[lead_at:lead_at + reader.sizes['lead']].any()
+  assert reader.step(3.0, *frame(), (float('-inf'), 36.0), 1_770_000_002.0, 'DE', 15.0) == pytest.approx(15 / 3.6)
+  assert not reader.network.calls[2][1][0][lead_at:lead_at + reader.sizes['lead']].any()
+  # Whatever else of the row is not finite, a negative infinite too, goes in as 0
+  spoilt.update({0: float('-inf'), 1: float('inf')})
+  assert reader.step(4.0, *frame(), (30.0, 36.0), 1_770_000_003.0, 'DE', 15.0) == pytest.approx(15 / 3.6)
+  assert reader.network.calls[3][1][0][:2].tolist() == [0.0, 0.0]
+  assert np.isfinite(reader.hidden).all()
+
+
+class Overflowing(RoadTypeNetwork):
+  """Says 15 km/h and the second road type; at its step `at` the output `name` holds `value`, as a step of the comma's
+  GPU (FLOAT16) that overflows would leave it."""
+  def __init__(self, at, name, value):
+    super().__init__()
+    self.at, self.name, self.value = at, name, value
+
+  def __call__(self, image, extra, hidden):
+    outputs = super().__call__(image, extra, hidden)
+    if len(self.calls) - 1 == self.at:
+      outputs[self.name] = outputs[self.name].copy()
+      outputs[self.name][0, 0] = self.value
+    return outputs
+
+
+@pytest.mark.parametrize('name', ['hidden_out', 'speed'])
+@pytest.mark.parametrize('value', [np.nan, np.inf, -np.inf])
+def test_a_step_that_comes_out_not_finite_says_no_speed_and_stays_out_of_the_memory(vision, name, value):
+  """(#104) The memory starts again only after 5 s without a step, which never happens while frames come: taken in, a
+  NaN was there at every later step, and the car held kph[0] as the limit."""
+  types = contract(output={'kph': [5, 10, 15, 20], 'road_types': ['town', 'motorway', 'rural']})
+  reader = brain.BrainReader(Overflowing(1, name, value), types, vision, 64, 32)
+  assert reader.step(0.0, *frame(), None, None, None, None) == pytest.approx(15 / 3.6) and reader.road_type == "motorway"
+  # No speed and no road type at that step: what the car publishes as unknown (pipeline.SpeedVision.frame)
+  assert reader.step(1.0, *frame(), None, None, None, None) == 0.0
+  assert (reader.speed_limit, reader.road_type) == (0.0, "")
+  assert reader.hidden.shape == (1, 4) and reader.hidden.dtype == np.float32 and not reader.hidden.any()
+  # The next step starts from zeros, as after a pause, and says its speed again
+  assert reader.step(2.0, *frame(), None, None, None, None) == pytest.approx(15 / 3.6) and reader.road_type == "motorway"
+  assert not reader.network.calls[2][2].any() and np.array_equal(reader.hidden, np.ones((1, 4), dtype=np.float32))
+
+
 BOX_GROUPS = [*GROUPS, 'sign_boxes']
 
 
