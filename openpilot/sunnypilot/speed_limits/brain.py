@@ -62,11 +62,13 @@ class BrainReader:
     self.signs = brain_inputs.SignInputs(vision)
     self.sign_boxes = brain_inputs.BoxInputs(vision, brain_inputs.SIGN_BOX_CHANNELS, brain_inputs.sign_box_channel(vision))
     self.light_boxes = brain_inputs.BoxInputs(vision, len(brain_inputs.LIGHTS), brain_inputs.light_box_channel)
+    self.sign_slots = brain_inputs.SlotInputs(vision)  # the signs one by one with their numbers (#110)
     self.class_plate = vision.class_plate
     self.plates = {plate for plate, trained in (("time", contract["step"].get("plates", False)),
                                                 ("wet", contract["step"].get("wet", False))) if trained}
     self.class_hours = vision.class_hours if contract["step"].get("hours", False) else lambda name: None
-    # Trained with the boxes of every sign read, those of another road too: only such a brain gets them (sign_boxes)
+    # Trained with the boxes of every sign read, those of another road too: only such a brain gets them (sign_boxes,
+    # sign_slots)
     self.other_road_boxes = bool(contract["step"].get("other_road_boxes", False))
     self.hidden = np.zeros(network.input_shape("hidden"), dtype=np.float32)
     self.speed_limit = 0.0
@@ -86,11 +88,13 @@ class BrainReader:
     hours only to one trained with hours (its contract's step): to another one, trained with them unknown on every frame,
     they would change the speed at random. Their boxes go as SignNet gave them (sign_boxes, light_boxes), in the pixels of the frame
     it read: the low one, also when the classifier's crops come from the full definition. sign_boxes gets the boxes of
-    seen for a brain trained with them (other_road_boxes), of the signs taken for any other; the number in force, the
+    seen for a brain trained with them (other_road_boxes), of the signs taken for any other, and so does sign_slots;
+    the number in force, the
     plates, the other signs confirmed and the lights always come from the signs taken."""
     boxes = [(sign["class"], sign["confidence"], sign["box"]) for sign in signs]
     every = [(sign["class"], sign["confidence"], sign["box"]) for sign in seen] if self.other_road_boxes and seen is not None else boxes
     self.sign_boxes.add(now, every, self.width, self.height)
+    self.sign_slots.add(now, every, self.width, self.height)
     self.light_boxes.add(now, boxes, self.width, self.height)
     if not self.plates:
       self.signs.add(now, [(sign["class"], sign["confidence"]) for sign in signs])
@@ -156,7 +160,7 @@ class BrainReader:
             "road_signs": self.signs.road_signs_row(now), "sign_boxes": self.sign_boxes.row(now),
             "light_boxes": self.light_boxes.row(now), "country_iso": brain_inputs.country_iso_row(country),
             "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz"),
-            "map_limit": self.map.row(now)}
+            "map_limit": self.map.row(now), "sign_slots": self.sign_slots.row(now)}
     # A number of the row that is not finite (a NaN steering angle or yaw) goes in as 0; the finite ones as they are, bit
     # for bit what the training gave (#104)
     extra = np.nan_to_num(brain_inputs.pack_inputs(rows, self.groups, self.sizes), nan=0.0, posinf=0.0, neginf=0.0)

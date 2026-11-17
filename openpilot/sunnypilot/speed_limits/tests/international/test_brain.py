@@ -581,6 +581,73 @@ def test_a_brain_trained_without_the_boxes_gets_what_it_got(reader):
   assert reader.network.calls[0][1].shape == (1, SIZE)
 
 
+SLOT_GROUPS = [*GROUPS, 'sign_slots']
+
+
+def slots_of(reader, call=0):
+  """The slots of sign_slots of a step, and its known and age."""
+  size = brain_inputs.INPUT_SIZES['sign_slots']
+  row = reader.network.calls[call][1][0, -size:]
+  return row[:-2].reshape(brain_inputs.SIGN_SLOTS, brain_inputs.SLOT_NUMBERS), row[-2:]
+
+
+def slotted(vision, every=False):
+  step = {'rate_hz': 4.0, 'groups': SLOT_GROUPS, 'memory_gap_seconds': 5.0, 'clock': 'schedule', 'picture': 'brain',
+          'other_road_boxes': every}
+  return brain.BrainReader(Network(), contract(step=step), vision, 1344, 760)
+
+
+def test_a_brain_trained_with_the_slots_gets_each_sign_with_its_number(vision):
+  """#110: two speed signs side by side are two slots, each with its own km/h; slots in order of x."""
+  reader = slotted(vision)
+  signs = [{'class': 'maximum_speed:80', 'confidence': 0.99, 'box': [1008.0, 190.0, 1050.0, 232.0]},
+           {'class': 'maximum_speed:60', 'confidence': 0.99, 'box': [1052.0, 190.0, 1090.0, 228.0]},
+           {'class': 'other_sign:give_way', 'confidence': 0.9, 'box': [84.0, 304.0, 168.0, 380.0]},
+           {'class': 'cancellation', 'confidence': 0.9, 'box': [600.0, 300.0, 620.0, 320.0]},
+           {'class': 'maximum_speed:unknown', 'confidence': 0.9, 'box': [700.0, 300.0, 704.0, 304.0]},
+           {'class': 'maximum_speed:50', 'confidence': 0.4, 'box': [500.0, 100.0, 540.0, 140.0]}]
+  reader.add_signs(0.0, signs)
+  reader.step(0.0, *big_frame(1344, 760), None, None, None, None)
+  slots, tail = slots_of(reader)
+  assert brain_inputs.INPUT_SIZES['sign_slots'] == 16 * 9 + 2 and list(tail) == [1.0, 0.0]
+  # left to right: the give way, the end, the far unknown, the 80, the 60; the unsure 50 nowhere
+  assert slots[0] == pytest.approx([1, 126 / 1344, 342 / 760, 84 / 1344, 76 / 760, 1, 0, 0, 0])
+  assert slots[1] == pytest.approx([1, 610 / 1344, 310 / 760, 20 / 1344, 20 / 760, 0, 0, 0, 1])
+  assert slots[2][[0, 5, 6, 7, 8]] == pytest.approx([1, 0, 0, 0, 0])
+  assert slots[3] == pytest.approx([1, 1029 / 1344, 211 / 760, 42 / 1344, 42 / 760, 0, 80 / 130, 1, 0])
+  assert slots[4][[0, 6, 7]] == pytest.approx([1, 60 / 130, 1])
+  assert not slots[5:].any()
+  # The next reading has no sign: the slots empty, the memory of the last one stays
+  reader.add_signs(0.25, [])
+  reader.step(0.25, *big_frame(1344, 760), None, None, None, None)
+  slots, tail = slots_of(reader, 1)
+  assert not slots.any() and tail[0] == 1 and tail[1] == pytest.approx(np.log1p(0.25) / brain_inputs.SIGN_AGE_SCALE)
+
+
+def test_other_signs_never_push_a_speed_sign_out_of_the_slots(vision):
+  reader = slotted(vision)
+  big = [{'class': 'other_sign:direction_left', 'confidence': 0.99, 'box': [70.0 * i, 100.0, 70.0 * i + 60, 300.0]}
+         for i in range(brain_inputs.SIGN_SLOTS + 2)]
+  small = {'class': 'maximum_speed:80', 'confidence': 0.99, 'box': [1300.0, 200.0, 1304.0, 204.0]}
+  reader.add_signs(0.0, [*big, small])
+  reader.step(0.0, *big_frame(1344, 760), None, None, None, None)
+  slots, _ = slots_of(reader)
+  assert slots[:, 0].all() and slots[-1][6] == pytest.approx(80 / 130) and (slots[:-1, 5] == 1).all()
+
+
+def test_the_slots_follow_the_boxes_of_every_sign_as_sign_boxes_does(vision):
+  reader = slotted(vision, every=True)
+  reader.add_signs(0.0, [OURS], [OURS, THEIRS])
+  reader.step(0.0, *big_frame(1344, 760), None, None, None, None)
+  slots, _ = slots_of(reader)
+  assert list(slots[:2, 6] * 130) == pytest.approx([40, 80])
+  reader = slotted(vision)
+  reader.add_signs(0.0, [OURS], [OURS, THEIRS])
+  reader.step(0.0, *big_frame(1344, 760), None, None, None, None)
+  slots, _ = slots_of(reader)
+  assert slots[0, 6] * 130 == pytest.approx(80) and not slots[1].any()
+
+
 def test_the_sign_distance_row():
   assert list(brain_inputs.sign_distance_row(0.0)) == [0.0, 0.0]
   assert list(brain_inputs.sign_distance_row(-3.0)) == [0.0, 0.0]

@@ -53,6 +53,12 @@ The groups, each one apart so that a comparison can leave it out:
   with no metres worked out: the picture cut in BOX_COLUMNS columns and, for the speed signs and for the other signs
   (sign_box_channel), the tallest box of each column; then whether a sign was ever seen and the age of the last one. A
   sign grows and moves to the side as the car nears it: what that means for the speed the network learns.
+- sign_slots: the signs of the last frame read one by one, each with what it says (SlotInputs, #110), where sign_boxes
+  has only the tallest box of each of its columns and no number: two speed signs side by side, ours and the one of an
+  exit, are two slots, each with its km/h, so the network can learn which number is of which road. SIGN_SLOTS slots, the
+  speed signs and the ends of a limit first, then the other signs; the slots in order of x, left to right. Then
+  whether a sign was ever seen and the age of the last one. The brains trained until 17 Nov 2026 have sign_boxes and
+  keep it; a brain of today takes sign_slots instead (the server's LEFT_OUT).
 - light_boxes: where the traffic lights of the last frame read are in the picture and how big, the same BoxInputs with a
   channel for each of LIGHTS (light_box_channel): the tallest light of each column by what it has lit, then whether a light
   was ever seen and the age of the last one. A red light near and in front is not one far to the side.
@@ -110,6 +116,11 @@ SIGN_METRES_MAX = 200.0
 BOX_COLUMNS = 8  # a group of boxes (BoxInputs) cuts the picture in so many columns, left to right
 BOX_NUMBERS = 3  # of a box: its width and its height over the frame's, its centre y over the frame's height
 SIGN_BOX_CHANNELS = 2  # of sign_boxes (sign_box_channel): a speed sign or the end of a limit, any other sign
+# sign_slots (SlotInputs, #110): so many signs of a frame, and of each: present, centre x and centre y over the frame,
+# width and height over the frame, another sign (1) or a speed sign or the end of a limit (0), its number / SIGN_KPH_SCALE,
+# the number read, the end of a limit. A far maximum_speed:unknown and an end are then not both "0".
+SIGN_SLOTS = 16  # 8 columns x 2 channels of sign_boxes held up to 16 boxes: never fewer here
+SLOT_NUMBERS = 9
 LIGHTS = ("red", "amber", "green", "off")  # the channels of light_boxes (light_box_channel): what a traffic light has lit
 NOT_SIGNS = ("traffic_light_", "road_user_")  # the kinds of other_sign that are no signs: a light, who is on the road
 SPEED_MAX = 60.0  # m/s
@@ -138,7 +149,8 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "d7016ace080049d8b8ae75119dd8f2f3b80634ebd417e5e4c8a99bcc4fdc4cd0",
                "c12716e61d873c3a34510ae58747ec3af934e17fc3e0344fa7945bca5cec8d36",
                "29960dec1c4fcadfd718ca158d1fdfdb6d051e1d19015546cacadc1644211801",
-               "6e1960feffe03ca96cc6db3a884ff9d056a43aafe01c3c03001feebbd1102fb3")
+               "6e1960feffe03ca96cc6db3a884ff9d056a43aafe01c3c03001feebbd1102fb3",
+               "b21d06e1ced966207431f647b91f44028b8f7eda8c863d90340bff42883530f6")
 
 
 def box_size(channels: int) -> int:
@@ -149,7 +161,8 @@ def box_size(channels: int) -> int:
 INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 3, "lead": 3, "country": len(COUNTRIES) + 1,
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
                "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS),
-               "light_boxes": box_size(len(LIGHTS)), "country_iso": len(COUNTRY_CODES) + 1, "hour_tz": 3, "map_limit": 2}
+               "light_boxes": box_size(len(LIGHTS)), "country_iso": len(COUNTRY_CODES) + 1, "hour_tz": 3, "map_limit": 2,
+               "sign_slots": SIGN_SLOTS * SLOT_NUMBERS + 2}
 
 
 class SignInputs:
@@ -315,6 +328,61 @@ class BoxInputs:
     known and the age of the last reading with a box, as a sign's age."""
     row = np.zeros(self._columns.size + 2, dtype=np.float32)
     row[:-2] = self._columns.ravel()
+    if self._seen_at is not None:
+      row[-2:] = 1.0, math.log1p(max(now - self._seen_at, 0.0)) / SIGN_AGE_SCALE
+    return row
+
+
+class SlotInputs:
+  """sign_slots: the signs of the last frame read, one slot each (#110). Of the signs read sure enough (vision.MIN_CONFIDENCE)
+  that sign_box_channel takes, the box's part inside the frame: the speed signs and the ends of a limit first, the
+  tallest first, then the other signs, the tallest first, so that a row of direction signs never pushes a speed sign out;
+  the first SIGN_SLOTS of them, then put in order of their centre x, left to right (a sign growing as the car nears it
+  keeps its place among the others). Of each slot SLOT_NUMBERS numbers (see SLOT_NUMBERS), zeros for an empty one; then,
+  for the group, known (1 once a sign was given) and the age of the last reading that had one.
+
+  add() each frame read, in order, as BoxInputs.add; row() at a step. chosen() is the rule alone, which the server also
+  uses to match its reviewed boxes to the slots: one rule, never a copy of it."""
+
+  def __init__(self, vision):
+    self._vision = vision
+    self._channel = sign_box_channel(vision)
+    self._slots = np.zeros((SIGN_SLOTS, SLOT_NUMBERS), dtype=np.float32)
+    self._seen_at: float | None = None
+
+  def chosen(self, boxes: list, width: float, height: float) -> list[tuple[int, tuple]]:
+    """[(the place in boxes, (left, top, right, bottom) inside the frame), ...] of the signs in the slots, in slot order.
+    boxes: (class, confidence, (x1, y1, x2, y2)) of a frame, in the pixels of a frame width x height."""
+    found = []
+    for at, (name, confidence, box) in enumerate(boxes):
+      channel = self._channel(name)
+      if channel is None or confidence < self._vision.MIN_CONFIDENCE:
+        continue
+      left, right = (min(max(float(x), 0.0), width) for x in (box[0], box[2]))
+      top, bottom = (min(max(float(y), 0.0), height) for y in (box[1], box[3]))
+      if right <= left or bottom <= top:
+        continue
+      found.append((channel, -(bottom - top), at, (left, top, right, bottom)))
+    found = sorted(found)[:SIGN_SLOTS]
+    return [(at, place) for _channel, _tall, at, place in sorted(found, key=lambda item: (item[3][0] + item[3][2], item[2]))]
+
+  def add(self, now: float, boxes: list, width: float, height: float) -> None:
+    self._slots[:] = 0.0
+    chosen = self.chosen(boxes, width, height)
+    for slot, (at, (left, top, right, bottom)) in enumerate(chosen):
+      name = boxes[at][0]
+      end = name.partition(":")[0] == self._vision.CANCELLATION
+      number = None if end else self._vision.class_speed(name)
+      self._slots[slot] = (1.0, (left + right) / 2 / width, (top + bottom) / 2 / height, (right - left) / width,
+                           (bottom - top) / height, self._channel(name), 0.0 if number is None else number / SIGN_KPH_SCALE,
+                           number is not None, end)
+    if chosen:
+      self._seen_at = now
+
+  def row(self, now: float) -> np.ndarray:
+    """The slots one after the other, then known and the age of the last reading with a sign, as a sign's age."""
+    row = np.zeros(INPUT_SIZES["sign_slots"], dtype=np.float32)
+    row[:-2] = self._slots.ravel()
     if self._seen_at is not None:
       row[-2:] = 1.0, math.log1p(max(now - self._seen_at, 0.0)) / SIGN_AGE_SCALE
     return row
