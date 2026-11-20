@@ -276,6 +276,9 @@ struct LongitudinalPlanSP @0xf35cc4560bbf6ec2 {
       speedLimitFinalLast @6 :Float32;
       speedLimitValid @7 :Bool;
       speedLimitLastValid @8 :Bool;
+      # Shadow mode (#117 step B): Smartspeed takes vision and a brain trained to stand says a valid 0 now
+      # (speedVisionSP.brainStatus "valid"): the car would stand. For the logs only, nothing acts on it yet.
+      visionStand @9 :Bool;
     }
 
     struct Assist {
@@ -545,6 +548,18 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
   # (a side street, an exit, the lane beside: not taken, rawSignTaken false), "unresolved" (it abstains: taken); ""
   # when it did not rule it (a release without it, a family it did not learn) or in an old log.
   rawSignRoad @18 :Text;
+  # What a 0 of speedLimit is (speed_limits/brain.py: BrainReader.status, #117 step B): "legacy" (the rules, a brain not
+  # trained to stand, an old log: 0 is "not sure", as always), "valid" (a brain trained to stand, its last finite answer
+  # at most a second old: 0 is its answer, the car stands), "unavailable" (that brain has no fresh answer: before its
+  # first step, after a step that was not finite, or older than a second). Shadow mode: the resolver only logs what a
+  # valid 0 would do (LongitudinalPlanSP.SpeedLimit.Resolver.visionStand), nothing acts on it yet.
+  brainStatus @19 :BrainStatus;
+
+  enum BrainStatus {
+    legacy @0;
+    valid @1;
+    unavailable @2;
+  }
 }
 
 struct CustomReserved11 @0xc2243c65e0340384 {

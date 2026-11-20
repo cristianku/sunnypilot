@@ -169,13 +169,14 @@ class TestSpeedLimitResolverValidation(OpenpilotTestCase):
 
 
 def setup_vision_sm_mock(mocker, car, vision, map_limit, vision_alive=True, vision_ahead=0., vision_ahead_distance=0.,
-                         vision_age=0., vision_reason="brain"):
-  """carStateSP, speedVisionSP and liveMapDataSP with the given limits (0: none)."""
+                         vision_age=0., vision_reason="brain", vision_status="legacy"):
+  """carStateSP, speedVisionSP and liveMapDataSP with the given limits (0: none); vision_status: its brainStatus."""
   sources = {
     'carState': create_mock({'gasPressed': False, 'brakePressed': False, 'standstill': False}, mocker),
     'carStateSP': create_mock({'speedLimit': car}, mocker),
     'speedVisionSP': create_mock({'speedLimit': vision, 'speedLimitAhead': vision_ahead,
-                                  'speedLimitAheadDistance': vision_ahead_distance, 'speedLimitReason': vision_reason}, mocker),
+                                  'speedLimitAheadDistance': vision_ahead_distance, 'speedLimitReason': vision_reason,
+                                  'brainStatus': vision_status}, mocker),
     'liveMapDataSP': create_mock({'speedLimit': map_limit, 'speedLimitValid': map_limit > 0., 'speedLimitAhead': 0.,
                                   'speedLimitAheadValid': 0., 'speedLimitAheadDistance': 0.}, mocker),
   }
@@ -269,3 +270,27 @@ class TestSpeedLimitResolverVision(OpenpilotTestCase):
     sm_mock = setup_sm_mock(mocker)
     resolver.update(20., sm_mock)
     assert resolver.limit_solutions[SpeedLimitSource.vision] == 0.
+
+  @parameterized.expand([
+    # #117 step B, shadow mode: a valid 0 of a brain trained to stand is logged (visionStand), and the resolver does
+    # what it did before: no limit, no source, the last one cleared under Smartspeed
+    (Policy.vision_only, 0., "valid", "brain", True, True),
+    (Policy.map_data_vision, 0., "valid", "brain", True, True),
+    (Policy.vision_only, 0., "unavailable", "brain", True, False),  # no fresh answer: never "stand"
+    (Policy.vision_only, 0., "legacy", "brain", True, False),  # a brain not trained to stand: 0 is "not sure"
+    (Policy.vision_only, 0., "valid", "brain", False, False),  # speedvisiond stopped
+    (Policy.vision_only, 1., "valid", "brain", True, False),  # a speed is no stand
+    (Policy.vision_only, 0., "valid", "sign", True, False),  # the rules
+    (Policy.map_data_only, 0., "valid", "brain", True, False),  # a policy that does not take vision
+  ], names=["policy", "vision", "status", "reason", "alive", "stand"])
+  def test_a_valid_0_is_only_logged(self, resolver_class, policy, vision, status, reason, alive, stand, mocker):
+    resolver = resolver_class()
+    resolver.policy = policy
+    resolver.speed_limit_last = resolver.speed_limit_final_last = 22.
+    resolver.update(0., setup_vision_sm_mock(mocker, 0., vision, 0., vision_alive=alive, vision_reason=reason,
+                                             vision_status=status))
+    assert resolver.vision_stand is stand
+    if vision == 0.:
+      assert resolver.speed_limit == 0. and not resolver.speed_limit_valid
+      if policy in (Policy.vision_only, Policy.map_data_vision):
+        assert resolver.speed_limit_last == 0. and resolver.source == SpeedLimitSource.none

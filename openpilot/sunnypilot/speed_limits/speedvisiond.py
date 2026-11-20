@@ -176,7 +176,7 @@ def main() -> None:
     for event in messaging.drain_sock(car["carState"]):
       state = event.carState
       speed_vision.car_state(now, event.logMonoTime * 1e-9, state.vEgo, state.steeringAngleDeg, state.leftBlinker,
-                             state.rightBlinker, state.yawRate, state.gasPressed, state.brakePressed)
+                             state.rightBlinker, state.yawRate, state.gasPressed, state.brakePressed, state.standstill)
     for event in messaging.drain_sock(car["selfdriveState"]):
       speed_vision.enabled(now, event.selfdriveState.enabled)
     for event in messaging.drain_sock(car["deviceMotion"]):

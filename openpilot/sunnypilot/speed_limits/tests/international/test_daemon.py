@@ -14,9 +14,10 @@ POLICY = {'gps_max_age_s': 2, 'gps_max_accuracy_m': 20, 'border_margin_m': 100, 
 
 
 def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=float('inf'), signs_from=0.0, reader=None,
-               brain_contract=None, sleep=lambda _: None, ruler=None):
+               brain_contract=None, sleep=lambda _: None, ruler=None, car_state=None):
   """The messages speedvisiond sends until 1.3 s: GPS in GB (with a fix until gps_fix_until), a 30 sign from signs_from;
-  ruler: the applicability network's class (applicability.Applicability), None for a release without it."""
+  ruler: the applicability network's class (applicability.Applicability), None for a release without it; car_state: the
+  carState given before every frame (a NS of its fields), None for none."""
   class Stop(Exception):
     pass
 
@@ -46,6 +47,8 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
       return [NS(logMonoTime=int((clock.now - 0.01) * 1e9), valid=True, gpsLocationExternal=g)]
     if sock == 'radarState':
       return [NS(radarState=NS(leadOne=NS(present=True, dRel=30.0, vLead=10.0)))]
+    if sock == 'carState' and car_state is not None:
+      return [NS(logMonoTime=int((clock.now - 0.01) * 1e9), carState=car_state)]
     return []
 
   class Pub:
@@ -149,9 +152,31 @@ class FakeBrain:
   def due(self, now):
     return not self.steps
 
+  def status(self, now):
+    return "legacy"
+
+  def add_pedals(self, now, gas, brake):
+    pass
+
+  def add_car_state(self, now, steering_deg, left, right, yaw_rate):
+    pass
+
+  def add_standstill(self, now, standstill):
+    self.standstill = getattr(self, 'standstill', []) + [standstill]
+
   def step(self, now, y, uv, lead, unix_seconds, country, v_ego, sign_distance, position=None):
     self.steps.append((lead, unix_seconds, country))
     self.speed_limit = 77 / 3.6
+
+
+def test_daemon_gives_the_brain_the_cars_standstill(candidate, vision, country):
+  # #121: carState.standstill goes to the brain at every carState, with or without the gas
+  stands = NS(vEgo=0.0, steeringAngleDeg=0.0, leftBlinker=False, rightBlinker=False, yawRate=0.0, gasPressed=False,
+              brakePressed=True, standstill=True)
+  out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH', reader=FakeBrain, brain_contract={},
+                   car_state=stands)
+  assert FakeBrain.last.standstill and all(FakeBrain.last.standstill)
+  assert out.brainStatus == 'legacy'
 
 
 def test_daemon_with_a_brain_publishes_what_it_says(candidate, vision, country):

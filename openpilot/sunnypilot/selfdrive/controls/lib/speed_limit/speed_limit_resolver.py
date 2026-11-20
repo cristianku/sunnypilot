@@ -75,6 +75,7 @@ class SpeedLimitResolver:
     self.speed_limit_final = 0.
     self.speed_limit_final_last = 0.
     self.speed_limit_offset = 0.
+    self.vision_stand = False  # shadow mode (#117 step B): _get_from_vision
 
   def update_speed_limit_states(self) -> None:
     self.speed_limit_final = self.speed_limit + self.speed_limit_offset
@@ -127,14 +128,22 @@ class SpeedLimitResolver:
     every step: the brain lowers it itself before a sign or a red light, and says no limit ahead: speedvisiond
     publishes none with a brain, and one in its message is never driven to (12 Nov 2026). A release without a brain
     (speedLimitReason is not "brain") holds the old limit up to the sign and leaves the lower one ahead for the rule
-    the map's goes through. Only Smartspeed (Vision Only, and a stored Map Data + Vision) takes it."""
+    the map's goes through. Only Smartspeed (Vision Only, and a stored Map Data + Vision) takes it.
+
+    Shadow mode (#117 step B): vision_stand says that a brain trained to stand gives a valid 0 now (brainStatus "valid")
+    under Smartspeed, where the car would stand. Only logged (Resolver.visionStand): the 0 stays "not sure" here as
+    always, and nothing else changes."""
     self._reset_limit_sources(SpeedLimitSource.vision)
+    self.vision_stand = False
     try:
       alive = sm.alive['speedVisionSP']
       vision = sm['speedVisionSP']
     except KeyError:
       return
     if alive:
+      self.vision_stand = (Policy(self.policy) in (Policy.vision_only, Policy.map_data_vision)
+                           and vision.speedLimitReason == "brain" and vision.brainStatus == "valid"
+                           and vision.speedLimit == 0.)
       ahead, distance = (0., 0.) if vision.speedLimitReason == "brain" else (vision.speedLimitAhead, vision.speedLimitAheadDistance)
       self._calculate_limits(SpeedLimitSource.vision, max(0., vision.speedLimit), ahead, distance, sm.recv_time['speedVisionSP'])
 

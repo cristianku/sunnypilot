@@ -65,6 +65,10 @@ The groups, each one apart so that a comparison can leave it out:
 - map_limit: the limit the map gives where the car is (liveMapDataSP.speedLimit while speedLimitValid), known; unknown where
   the map has none or has said nothing for MAP_SECONDS (MapInputs). Never learned unless the training is asked for it
   (the server's OPTIONAL): the brain then weighs it with what it sees, no code picks between the two.
+- standstill: whether the car stands, as carState.standstill says it at the frame (StandstillInputs, #121), known. What
+  the car is doing now, never what to do: the brain still learns from the picture when to leave, and it is given with
+  or without a press of the gas. Unknown, not "moving", before the first carState or when none came for
+  STANDSTILL_SECONDS.
 """
 from bisect import bisect_right
 from datetime import datetime, timedelta, timezone
@@ -134,6 +138,7 @@ MOTION_SECONDS = 1.0  # a signal not heard for longer is unknown
 CAR_YAW_MIN = 1e-4  # rad/s: a car whose yawRate stays 0 has no sensor behind it
 MEMORY_GAP_SECONDS = 5.0  # longer without a frame: its memory starts again from zeros
 MAP_SECONDS = 3.0  # the map speaks once a second (liveMapDataSP): not heard for longer, its limit is unknown
+STANDSTILL_SECONDS = 1.0  # carState comes at 100 Hz: not heard for longer, whether the car stands is unknown
 # The hours from UTC in winter, of the countries with the EU's summer time. Arithmetic on UTC: a comma may have no time zones.
 WINTER_UTC_HOURS = {"CH": 1, "DE": 1, "FR": 1, "IT": 1, "AT": 1}
 # The earlier files of this one a published brain may have been trained with: since each of them groups were only added, or
@@ -150,7 +155,8 @@ SAME_GROUPS = ("29e3c8b0717884ee545da22ee27520c6a3366f11d4ac28d2028e96a016dcf467
                "c12716e61d873c3a34510ae58747ec3af934e17fc3e0344fa7945bca5cec8d36",
                "29960dec1c4fcadfd718ca158d1fdfdb6d051e1d19015546cacadc1644211801",
                "6e1960feffe03ca96cc6db3a884ff9d056a43aafe01c3c03001feebbd1102fb3",
-               "b21d06e1ced966207431f647b91f44028b8f7eda8c863d90340bff42883530f6")
+               "b21d06e1ced966207431f647b91f44028b8f7eda8c863d90340bff42883530f6",
+               "ce1755aae37540976f749ee2c1283d5e457bb51bdd059a6232129625ae4fe1c0")
 
 
 def box_size(channels: int) -> int:
@@ -162,7 +168,7 @@ INPUT_SIZES = {"signs": 11, "plate": len(PLATES) + 1, "plate_hours": 5, "hour": 
                "pedals": 3, "speed": 2, "plate_wet": 1, "engaged": 7, "sign_distance": 2,
                "motion": 8, "road_signs": 2 * len(ROAD_SIGNS), "sign_boxes": box_size(SIGN_BOX_CHANNELS),
                "light_boxes": box_size(len(LIGHTS)), "country_iso": len(COUNTRY_CODES) + 1, "hour_tz": 3, "map_limit": 2,
-               "sign_slots": SIGN_SLOTS * SLOT_NUMBERS + 2}
+               "sign_slots": SIGN_SLOTS * SLOT_NUMBERS + 2, "standstill": 2}
 
 
 class SignInputs:
@@ -620,6 +626,31 @@ class MapInputs:
 
   def row(self, now: float) -> np.ndarray:
     return map_limit_row(self._kph if now - self._at <= MAP_SECONDS else None)
+
+
+class StandstillInputs:
+  """The standstill group (#121): add() every carState, row() at a moment after them. The training gives it the
+  carStates of the log in their order, up to the frame's moment, as the car does at 100 Hz."""
+
+  def __init__(self):
+    self._standstill = False
+    self._at = -math.inf
+
+  def add(self, now: float, standstill: bool) -> None:
+    """carState.standstill."""
+    self._standstill, self._at = bool(standstill), now
+
+  def lost(self, last: float) -> None:
+    """The last carState came at last, not later: only the server calls it, which reads a log that keeps the changes
+    and gives the value held again at each frame until the log says carState stopped (GAP_SECONDS after its last)."""
+    self._at = min(self._at, last)
+
+  def row(self, now: float) -> np.ndarray:
+    """Stands, known; zeros when no carState came for STANDSTILL_SECONDS or before the first: unknown, never moving."""
+    row = np.zeros(INPUT_SIZES["standstill"], dtype=np.float32)
+    if now - self._at <= STANDSTILL_SECONDS:
+      row[:] = float(self._standstill), 1.0
+    return row
 
 
 def speed_row(metres_per_second: float | None) -> np.ndarray:

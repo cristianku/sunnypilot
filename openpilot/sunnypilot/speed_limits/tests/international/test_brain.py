@@ -653,3 +653,115 @@ def test_the_sign_distance_row():
   assert list(brain_inputs.sign_distance_row(-3.0)) == [0.0, 0.0]
   assert brain_inputs.sign_distance_row(30.0) == pytest.approx([0.3, 1.0])
   assert brain_inputs.sign_distance_row(900.0) == pytest.approx([brain_inputs.SIGN_METRES_MAX / brain_inputs.SIGN_METRES_SCALE, 1.0])
+
+
+STAND_GROUPS = [*GROUPS, 'standstill']
+
+
+class Standing(Network):
+  """Says class 0: 0 km/h for a brain trained to stand (#117 step B)."""
+  def __call__(self, image, extra, hidden):
+    self.calls.append((image, extra, hidden))
+    return {'speed': np.array([[0.9, 0.1, 0.0, 0.0]], dtype=np.float32), 'hidden_out': hidden + 1}
+
+
+def stand_reader(vision, network=None, **output):
+  step = contract()['step'] | {'groups': STAND_GROUPS}
+  output = {'kph': [0, 5, 10, 15], 'zero_valid': True} | output
+  return brain.BrainReader(network or Standing(), contract(step=step, output=output), vision, 64, 32)
+
+
+def standstill_of(reader, call=-1):
+  return reader.network.calls[call][1][0, -brain_inputs.INPUT_SIZES['standstill']:].tolist()
+
+
+def test_the_file_before_the_standstill_group_keeps_its_brains():
+  # The standstill group was only added (#121): the brains trained with the file before it get the same numbers.
+  assert 'ce1755aae37540976f749ee2c1283d5e457bb51bdd059a6232129625ae4fe1c0' in brain_inputs.SAME_GROUPS
+  assert list(brain_inputs.INPUT_SIZES)[-1] == 'standstill'
+
+
+def test_a_brain_trained_with_standstill_gets_the_cars_word(vision):
+  """#121: the stop, a wait, a tap of the gas while it stands, the first motion; carState.standstill as it is, the gas
+  apart (pedals)."""
+  reader = stand_reader(vision)
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [0.0, 0.0]  # before the first carState: unknown, never "moving"
+  reader.add_standstill(1.5, False)
+  reader.step(2.0, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [0.0, 1.0]  # moving
+  reader.add_standstill(2.6, True)
+  reader.step(3.0, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [1.0, 1.0]  # stopped
+  for now in (3.5, 4.0, 4.5):
+    reader.add_standstill(now - 0.01, True)
+    reader.step(now, *frame(), None, None, None, None)
+    assert standstill_of(reader) == [1.0, 1.0]  # the wait, nobody touches the gas
+  reader.add_pedals(4.9, True, False)
+  reader.add_standstill(4.9, True)
+  reader.step(5.0, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [1.0, 1.0]  # a tap while it stands changes nothing here
+  reader.add_standstill(5.4, False)
+  reader.step(5.5, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [0.0, 1.0]  # the first motion
+
+
+def test_standstill_is_unknown_once_the_car_says_nothing(vision):
+  reader = stand_reader(vision)
+  reader.add_standstill(1.0, True)
+  reader.step(1.0 + brain_inputs.STANDSTILL_SECONDS, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [1.0, 1.0]
+  reader.step(1.0 + brain_inputs.STANDSTILL_SECONDS + 0.5, *frame(), None, None, None, None)
+  assert standstill_of(reader) == [0.0, 0.0]  # stale: unknown, not "moving"
+
+
+def test_standstill_lost_moves_the_last_carstate_back_never_forward():
+  inputs = brain_inputs.StandstillInputs()
+  inputs.add(3.0, True)
+  inputs.lost(5.0)  # later than the last one: nothing changes
+  assert inputs.row(3.0 + brain_inputs.STANDSTILL_SECONDS).tolist() == [1.0, 1.0]
+  inputs.lost(2.0)
+  assert inputs.row(2.0 + brain_inputs.STANDSTILL_SECONDS).tolist() == [1.0, 1.0]
+  assert inputs.row(2.0 + brain_inputs.STANDSTILL_SECONDS + 0.01).tolist() == [0.0, 0.0]
+
+
+def test_a_brain_trained_without_standstill_never_gets_it(reader):
+  reader.add_standstill(0.5, True)
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert reader.network.calls[0][1].shape == (1, SIZE)
+
+
+def test_a_brain_not_trained_to_stand_keeps_its_0_as_not_sure(reader):
+  assert reader.status(0.0) == 'legacy'
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert reader.status(1.0) == reader.status(100.0) == 'legacy'
+
+
+def test_a_brain_trained_to_stand_says_when_its_0_is_an_answer(vision):
+  reader = stand_reader(vision)
+  assert reader.status(0.0) == 'unavailable'  # before its first step
+  assert reader.step(1.0, *frame(), None, None, None, None) == 0.0
+  assert reader.status(1.0) == reader.status(1.0 + brain.FRESH_SECONDS) == 'valid'
+  assert reader.status(1.01 + brain.FRESH_SECONDS) == 'unavailable'  # no new answer for too long
+
+
+@pytest.mark.parametrize('name', ['hidden_out', 'speed'])
+def test_a_stand_brain_step_that_is_not_finite_is_no_answer(vision, name):
+  class Broken(Standing):
+    def __call__(self, image, extra, hidden):
+      outputs = super().__call__(image, extra, hidden)
+      if len(self.calls) == 2:
+        outputs[name] = outputs[name] * np.nan
+      return outputs
+  reader = stand_reader(vision, Broken())
+  reader.step(1.0, *frame(), None, None, None, None)
+  assert reader.status(1.0) == 'valid'
+  assert reader.step(1.25, *frame(), None, None, None, None) == 0.0
+  assert reader.status(1.25) == 'unavailable'  # its 0 here is no answer, never "stand"
+  reader.step(1.5, *frame(), None, None, None, None)
+  assert reader.status(1.5) == 'valid'
+
+
+def test_a_brain_trained_to_stand_starts_its_table_at_0(vision):
+  with pytest.raises(ValueError, match='0 km/h'):
+    stand_reader(vision, kph=[5, 10, 15, 20])

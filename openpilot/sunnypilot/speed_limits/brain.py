@@ -20,6 +20,12 @@ sign read, those the applicability network gives to another road too, for a brai
 in force (signs) comes from the signs taken for every brain: the applicability network still decides that. Its
 step.road_sign_kinds says how many kinds of other sign it was trained with (road_signs): it is given the first so many
 of brain_inputs.ROAD_SIGNS, ROAD_SIGN_KINDS when a brain trained with an earlier file does not say.
+
+A brain trained to stand (#117 step B; its contract's output.zero_valid, its kph starting at 0) says 0 when the car must
+stand: for it a 0 is an answer, where for every other brain and for the rules it is "not sure". status() tells the two
+apart for speedVisionSP.brainStatus: "legacy" for any other brain, "valid" while such a brain's last finite step is
+fresh (FRESH_SECONDS), "unavailable" before its first one, after one that was not finite and once it is old. The car is
+in shadow mode: the resolver only logs what a valid 0 would do (its visionStand), nothing acts on it yet.
 """
 import hashlib
 import math
@@ -28,6 +34,9 @@ from pathlib import Path
 import numpy as np
 
 from openpilot.sunnypilot.speed_limits import brain_inputs
+
+FRESH_SECONDS = 1.0  # a stand brain's answer older than this is no answer (unavailable): it steps at 4 Hz
+STATUSES = ("legacy", "valid", "unavailable")  # speedVisionSP.brainStatus, in the order of the schema
 
 
 class BrainReader:
@@ -52,6 +61,10 @@ class BrainReader:
     self.sizes = brain_inputs.input_sizes(brain_inputs.ROAD_SIGN_KINDS if kinds is None else kinds)
     self.network = network
     self.kph = contract["output"]["kph"]
+    # A brain trained to stand: its first class is 0 km/h, an answer (#117 step B). Its table must start there.
+    self.zero_valid = bool(contract["output"].get("zero_valid", False))
+    if self.zero_valid and float(self.kph[0]) != 0.0:
+      raise ValueError("a brain trained to stand has 0 km/h as its first class")
     self.period = 1.0 / contract["step"]["rate_hz"]
     self.schedule = {"last": False, "schedule": True}[contract["step"].get("clock", "last")]
     self.memory_gap = contract["step"]["memory_gap_seconds"]
@@ -75,11 +88,13 @@ class BrainReader:
     self.road_type = ""
     self.last_step = -math.inf
     self.next_step = -math.inf
+    self.answer_at = -math.inf  # the last step whose answer was finite: status()
     self.pedals = brain_inputs.PedalInputs()
     self.engaged = brain_inputs.EngagedInputs()
     self.map = brain_inputs.MapInputs()
     self.wants_map = "map_limit" in self.groups  # only such a brain is ever given the map's limit
     self.motion = brain_inputs.MotionInputs()
+    self.standstill = brain_inputs.StandstillInputs()
 
   def add_signs(self, now: float, signs: list[dict], seen: list[dict] | None = None) -> None:
     """A frame's signs as vision.read_signs gives them, those taken: without the ones the applicability network gave to
@@ -114,6 +129,17 @@ class BrainReader:
   def add_car_state(self, now: float, steering_deg: float, left: bool, right: bool, yaw_rate: float) -> None:
     """Every carState: the steering wheel, the turn signals and the car's yaw rate."""
     self.motion.add_car_state(now, steering_deg, left, right, yaw_rate)
+
+  def add_standstill(self, now: float, standstill: bool) -> None:
+    """Every carState: carState.standstill (#121), given to every brain trained with the group, with or without the gas."""
+    self.standstill.add(now, standstill)
+
+  def status(self, now: float) -> str:
+    """What a 0 of speed_limit is (STATUSES): "legacy" for a brain not trained to stand, where it is "not sure"; for one
+    trained to stand, "valid" while its last finite answer is FRESH_SECONDS old or less, else "unavailable"."""
+    if not self.zero_valid:
+      return "legacy"
+    return "valid" if now - self.answer_at <= FRESH_SECONDS else "unavailable"
 
   def add_device_motion(self, now: float, z: float, valid: bool) -> None:
     """Every deviceMotion: angularVelocityDevice.z and its valid flag."""
@@ -160,7 +186,8 @@ class BrainReader:
             "road_signs": self.signs.road_signs_row(now), "sign_boxes": self.sign_boxes.row(now),
             "light_boxes": self.light_boxes.row(now), "country_iso": brain_inputs.country_iso_row(country),
             "hour_tz": brain_inputs.hour_row(brain_inputs.zone_hour(unix_seconds, country, position), "hour_tz"),
-            "map_limit": self.map.row(now), "sign_slots": self.sign_slots.row(now)}
+            "map_limit": self.map.row(now), "sign_slots": self.sign_slots.row(now),
+            "standstill": self.standstill.row(now)}
     # A number of the row that is not finite (a NaN steering angle or yaw) goes in as 0; the finite ones as they are, bit
     # for bit what the training gave (#104)
     extra = np.nan_to_num(brain_inputs.pack_inputs(rows, self.groups, self.sizes), nan=0.0, posinf=0.0, neginf=0.0)
@@ -169,9 +196,11 @@ class BrainReader:
       # Not into the memory, where it would stay: this step says no speed, and the next one starts from zeros (#104)
       self.hidden = np.zeros_like(self.hidden)
       self.speed_limit, self.road_type = 0.0, ""
+      self.answer_at = -math.inf  # no answer: a stand brain's 0 here is "unavailable", never "stand"
       return self.speed_limit
     self.hidden = outputs["hidden_out"]
     self.speed_limit = self.kph[int(np.argmax(outputs["speed"]))] / 3.6
+    self.answer_at = now
     if "road_type" in outputs:
       self.road_type = self.road_types[int(np.argmax(outputs["road_type"]))]
     return self.speed_limit

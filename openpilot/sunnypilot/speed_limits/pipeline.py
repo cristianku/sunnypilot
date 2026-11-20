@@ -118,8 +118,10 @@ class SpeedVision:
     self._fix_unix: float | None = None  # its GPS clock (s), when it is a fix with one
 
   def car_state(self, now: float, log_time: float, v_ego: float, steering_deg: float, left: bool, right: bool,
-                yaw_rate: float, gas: bool, brake: bool) -> None:
-    """Every carState. log_time: the message's own time (logMonoTime, s), for the metres driven."""
+                yaw_rate: float, gas: bool, brake: bool, standstill: bool | None = None) -> None:
+    """Every carState. log_time: the message's own time (logMonoTime, s), for the metres driven. standstill:
+    carState.standstill, None from a caller that does not give it: the brain's standstill group stays unknown then,
+    never "moving" (#121)."""
     self.v_ego = v_ego
     self.distance.add_speed(log_time, v_ego)
     if self.road_types is not None:
@@ -127,6 +129,8 @@ class SpeedVision:
     if self.reader is not None:
       self.reader.add_pedals(now, gas, brake)
       self.reader.add_car_state(now, steering_deg, left, right, yaw_rate)
+      if standstill is not None:
+        self.reader.add_standstill(now, standstill)
 
   def enabled(self, now: float, enabled: bool) -> None:
     """Every selfdriveState, after the carStates that came before it: whether openpilot is engaged."""
@@ -198,6 +202,9 @@ class SpeedVision:
       memory.fill_log(out)  # for the logs: the last sign read
       out.speedLimitState = "limit" if reader.speed_limit > 0 else "unknown"
       out.speedLimitReason = "brain"
+      # What a 0 of speedLimit is: "valid" is a brain trained to stand saying "stand" (#117 step B). Shadow mode: the
+      # resolver logs it, nothing on the car acts on it yet.
+      out.brainStatus = reader.status(now)
       if reader.road_type:  # shown on the screen only; a brain exported before 12 Nov 2026 has none
         out.roadType = reader.road_type
     else:
@@ -217,6 +224,7 @@ class SpeedVision:
       out.signRead = memory.sign_read
       out.roadType = road_type or ""
       memory.fill_log(out)  # for the logs: why the limit is what it is, the last sign read taken or not
+      out.brainStatus = "legacy"  # the rules: a 0 is "not sure"
     out.modelName = self.files.name
     out.signDistance = sign_distance
     out.signSize = distance.side

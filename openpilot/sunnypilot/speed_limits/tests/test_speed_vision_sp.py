@@ -23,7 +23,8 @@ except ImportError:  # no opendbc (cereal's import path): the file alone
 FIELDS = {"speedLimit": 0, "modelName": 1, "signRead": 2, "roadType": 3, "speedLimitState": 4, "speedLimitReason": 5,
           "rawSignClass": 6, "rawSignSpeed": 7, "rawSignConfidence": 8, "rawSignTaken": 9, "signDistance": 10,
           "signSize": 11, "rawSignValue": 12, "rawSignUnit": 13, "rawSignCountry": 14,
-          "speedLimitAhead": 15, "speedLimitAheadDistance": 16, "rawSignSeen": 17, "rawSignRoad": 18}
+          "speedLimitAhead": 15, "speedLimitAheadDistance": 16, "rawSignSeen": 17, "rawSignRoad": 18,
+          "brainStatus": 19}
 # speedVisionSP before the fields for the logs: an old log's message.
 OLD = """@0xe0b6b2b0c0a1d2f3;
 struct SpeedVisionSP {

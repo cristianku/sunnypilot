@@ -45,7 +45,7 @@ class Brain:
     self.speed_limit = 0.0
     self.road_type = ""
     self.signs = NS(read_at=None)
-    self.given, self.seen, self.steps, self.enabled, self.map = [], [], [], [], []
+    self.given, self.seen, self.steps, self.enabled, self.map, self.standstill = [], [], [], [], [], []
 
   def add_signs(self, now, signs, seen=None):
     self.given.append(signs)
@@ -58,6 +58,12 @@ class Brain:
 
   def add_car_state(self, now, steering_deg, left, right, yaw_rate):
     pass
+
+  def add_standstill(self, now, standstill):
+    self.standstill.append((now, standstill))
+
+  def status(self, now):
+    return "legacy"
 
   def add_device_motion(self, now, z, valid):
     pass
@@ -165,6 +171,43 @@ def test_the_brain_gets_the_cars_signals_at_its_step(frames):
   assert brain.enabled == [True]
   assert brain.steps[0] == {"lead": (30.0, 36.0), "unix": pytest.approx(1_770_000_000), "country": None, "v_ego": 20.0}
   assert brain.steps[1]["lead"] is None and brain.steps[1]["unix"] == pytest.approx(1_770_000_001)  # the clock runs on
+
+
+def test_the_brain_gets_the_cars_standstill_and_nothing_from_a_caller_without_it(frames):
+  # #121: carState.standstill goes to the brain at every carState; a caller that does not give it leaves it unknown
+  brain = Brain()
+  speed_vision = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 1141.5, None, None, reader=brain)
+  speed_vision.car_state(5.0, 4.99, 0.0, 0.0, False, False, 0.0, True, False, True)  # a tap of the gas while it stands
+  speed_vision.car_state(5.1, 5.09, 0.0, 0.0, False, False, 0.0, False, False)
+  assert brain.standstill == [(5.0, True)]
+
+
+class StandBrain(Brain):
+  """A brain trained to stand, saying 0 km/h: its status is the reader's."""
+  def __init__(self, status):
+    super().__init__()
+    self._status = status
+
+  def status(self, now):
+    return self._status
+
+  def step(self, now, y, uv, lead, unix_seconds, country, v_ego, sign_distance, position=None):
+    self.steps.append(now)
+    self.speed_limit = 0.0
+
+
+@pytest.mark.parametrize("status", ["valid", "unavailable", "legacy"])
+def test_the_message_says_what_a_0_of_the_brain_is(frames, status):
+  # #117 step B: the brain's 0 goes out as it always did; brainStatus tells "stand" from "not sure"
+  frames.append([])
+  sent = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 1141.5, None, None, reader=StandBrain(status)).frame(1.0, Y, UV)
+  assert (sent["speedLimit"], sent["speedLimitState"], sent["brainStatus"]) == (0.0, "unknown", status)
+
+
+def test_the_rules_say_their_0_is_not_sure(frames):
+  frames.append([])
+  sent = pipeline.SpeedVision(files(), WIDTH, HEIGHT, 1141.5, None, None).frame(1.0, Y, UV)
+  assert (sent["speedLimit"], sent["brainStatus"]) == (0.0, "legacy")
 
 
 def test_only_the_last_gps_message_before_a_frame_counts(frames):
