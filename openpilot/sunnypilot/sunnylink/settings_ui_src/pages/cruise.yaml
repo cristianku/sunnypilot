@@ -230,6 +230,8 @@ sections:
   - key: SpeedLimitOffsetType
     widget: multiple_button
     title: Offset Type
+    visibility:
+    - {type: param_compare, key: SpeedLimitMode, op: '<', value: 4}
     options:
     - value: 0
       label: 'Off'
@@ -247,6 +249,7 @@ sections:
       metric: km/h
       imperial: mph
     visibility:
+    - {type: param_compare, key: SpeedLimitMode, op: '<', value: 4}
     - type: param_compare
       key: SpeedLimitOffsetType
       op: '>'

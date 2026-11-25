@@ -14,7 +14,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD, get_sanitize_int_param
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE, LIMIT_ADAPT_ACC
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy, OffsetType
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode, OffsetType, Policy
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
@@ -62,6 +62,7 @@ class SpeedLimitResolver:
       self._reset_limit_sources(source)
 
     self.is_metric = self.params.get_bool("IsMetric")
+    self.smartspeed = self.params.get("SpeedLimitMode", return_default=True) == Mode.smartspeed
     self.offset_type = get_sanitize_int_param(
       "SpeedLimitOffsetType",
       OffsetType.min().value,
@@ -99,12 +100,17 @@ class SpeedLimitResolver:
   def update_params(self):
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.policy = self.params.get("SpeedLimitPolicy", return_default=True)
+      self.smartspeed = self.params.get("SpeedLimitMode", return_default=True) == Mode.smartspeed
+      if self.smartspeed:
+        # A previous mode may have cached a target with its offset.
+        self.speed_limit_final_last = self.speed_limit_last
       self.is_metric = self.params.get_bool("IsMetric")
       self.offset_type = self.params.get("SpeedLimitOffsetType", return_default=True)
       self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
 
   def _get_speed_limit_offset(self) -> float:
-    if self.offset_type == OffsetType.off:
+    # In Smartspeed the brain already supplies the cruise target, not a posted limit to adjust.
+    if self.smartspeed or self.offset_type == OffsetType.off:
       return 0
     elif self.offset_type == OffsetType.fixed:
       return float(self.offset_value * (CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS))

@@ -977,6 +977,14 @@
                   "value": 2,
                   "label": "Percentage"
                 }
+              ],
+              "visibility": [
+                {
+                  "type": "param_compare",
+                  "key": "SpeedLimitMode",
+                  "op": "<",
+                  "value": 4
+                }
               ]
             },
             {
@@ -991,6 +999,12 @@
                 "imperial": "mph"
               },
               "visibility": [
+                {
+                  "type": "param_compare",
+                  "key": "SpeedLimitMode",
+                  "op": "<",
+                  "value": 4
+                },
                 {
                   "type": "param_compare",
                   "key": "SpeedLimitOffsetType",

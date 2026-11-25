@@ -14,7 +14,7 @@ from openpilot.cereal import custom
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE
 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver, ALL_SOURCES
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode, OffsetType, Policy
 from openpilot.common.test import OpenpilotTestCase
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
@@ -189,6 +189,25 @@ def setup_vision_sm_mock(mocker, car, vision, map_limit, vision_alive=True, visi
 
 
 class TestSpeedLimitResolverVision(OpenpilotTestCase):
+
+  @parameterized.expand([
+    (OffsetType.fixed, 10, 80.), (OffsetType.fixed, -10, 60.),
+    (OffsetType.percentage, 10, 77.), (OffsetType.percentage, -10, 63.),
+  ], names=["offset_type", "offset", "assist_target"])
+  def test_offset_follows_mode_not_vision_source(self, resolver_class, offset_type, offset, assist_target, mocker):
+    resolver = resolver_class()
+    params = resolver.params
+    params.put_bool("IsMetric", True, block=True)
+    params.put("SpeedLimitPolicy", int(Policy.vision_only), block=True)
+    params.put("SpeedLimitOffsetType", int(offset_type), block=True)
+    params.put("SpeedLimitValueOffset", offset, block=True)
+    sm = setup_vision_sm_mock(mocker, 0., 70 * CV.KPH_TO_MS, 60 * CV.KPH_TO_MS)
+    for mode, target in ((Mode.assist, assist_target), (Mode.smartspeed, 70.), (Mode.assist, assist_target)):
+      params.put("SpeedLimitMode", int(mode), block=True)
+      resolver.frame = 0  # next settings refresh
+      resolver.update(20., sm)
+      self.assertAlmostEqual(resolver.speed_limit_final_last * CV.MS_TO_KPH, target)
+      self.assertAlmostEqual(resolver.speed_limit_offset * CV.MS_TO_KPH, target - 70.)
 
   @parameterized.expand([
     # policy, car, vision, map, expected limit, expected source
