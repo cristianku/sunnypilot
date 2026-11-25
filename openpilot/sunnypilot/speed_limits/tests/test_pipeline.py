@@ -96,12 +96,55 @@ def test_a_release_is_read_from_its_directory(tmp_path):
   assert found.brain is None and found.road_type is None and found.decider_contract == {"task": "decider"}
   assert found.onnx() == [tmp_path / "signnet.onnx", tmp_path / "classifier.onnx", tmp_path / "decider.onnx"]
   assert found.settings == {"min_confidence": 0.8}
+  assert found.classifier_countries == ()
+  country_input = {"name": "country", "encoding": "one_hot", "dtype": "float32", "shape": [1, 2],
+                   "codes": ["unknown", "DE"]}
+  contract = {"output": {"classes": ["maximum_speed:50"]}, "country_input": country_input}
+  (tmp_path / "classifier.json").write_text(json.dumps(contract))
+  assert pipeline.release(tmp_path).classifier_countries == ("unknown", "DE")
+  country_input["shape"] = [1, 3]
+  (tmp_path / "classifier.json").write_text(json.dumps(contract))
+  assert pipeline.release(tmp_path) is None
 
 
 def test_no_release_in_an_older_format_or_an_empty_directory(tmp_path):
   assert pipeline.release(tmp_path) is None
   (tmp_path / "speed_limits.json").write_text(json.dumps({"format": 1}))
   assert pipeline.release(tmp_path) is None
+
+
+def test_classifier_uses_current_gps_country_or_unknown(monkeypatch):
+  inputs = []
+  settings = files()
+  settings.classifier_countries = ("unknown", "DE", "CH")
+
+  def classifier(*, images, country):
+    inputs.append(country.tolist())
+    return {"logits": np.array([[0.0]])}
+
+  def read_signs(y, uv, signnet_input, finder, read, classes, full):
+    read(np.zeros((1, 3, 160, 160), dtype=np.float32))
+    return []
+
+  monkeypatch.setattr(vision, "read_signs", read_signs)
+  speed = pipeline.SpeedVision(settings, WIDTH, HEIGHT, 0, None, classifier, settings_country="CH")
+  countries = iter([None, "DE", None, "IT", "CH"])
+  speed.country = NS(update=lambda *_: next(countries))
+  for i in range(5):
+    speed.frame(float(i), Y, UV)
+  assert inputs == [[[1, 0, 0]], [[0, 1, 0]], [[1, 0, 0]], [[1, 0, 0]], [[0, 0, 1]]]
+
+
+def test_classifier_only_gps_does_not_change_the_memory_country(monkeypatch):
+  settings = files(classifier_country_policy={"enabled": True})
+  settings.classifier_countries = ("unknown", "DE", "CH")
+  resolver = NS(update=lambda *_: "DE")
+  monkeypatch.setattr(pipeline.CountryResolver, "from_settings", lambda _borders, policy: resolver if policy else None)
+  monkeypatch.setattr(vision, "read_signs", lambda *_: [])
+  speed = pipeline.SpeedVision(settings, WIDTH, HEIGHT, 0, None, None, settings_country="CH")
+  assert speed.classifier_country is resolver
+  speed.frame(0, Y, UV)
+  assert speed.memory.country == "CH"
 
 
 def test_the_maps_limit_goes_to_the_brain_and_to_nothing_else(frames):

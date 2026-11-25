@@ -31,6 +31,22 @@ PERIOD = 0.2  # seconds between the frames read
 DEFAULT_COUNTRY = "CH"  # until GPS gives one, without a country chosen in Settings › OSM
 
 
+def classifier_country_codes(contract: dict) -> tuple[str, ...]:
+  if "country_input" not in contract:
+    return ()
+  field = contract["country_input"]
+  if not isinstance(field, dict) or not isinstance(field.get("codes"), list):
+    raise ValueError("Invalid classifier country input")
+  codes = tuple(field["codes"])
+  if (not codes or codes[0] != "unknown" or any(
+      not isinstance(code, str) or len(code) != 2 or not code.isascii() or not code.isalpha() or not code.isupper()
+      for code in codes[1:]) or len(set(codes)) != len(codes) or
+      (field.get("name"), field.get("encoding"), field.get("dtype"), field.get("shape")) !=
+      ("country", "one_hot", "float32", [1, len(codes)])):
+    raise ValueError("Invalid classifier country input")
+  return codes
+
+
 class Networks:
   """The files of a release in its directory: SignNet (finder), the classifier and its classes, the name of the release;
   the road type network and its classes when the release has one (road_type, optional in format 2); the brain and its
@@ -44,6 +60,7 @@ class Networks:
     self.classifier = directory / manifest["classifier"]["file"]
     contract = json.loads((directory / manifest["classifier"]["contract"]).read_text())
     self.classes: list[str] = contract["output"]["classes"]
+    self.classifier_countries = classifier_country_codes(contract)
     self.road_type: Path | None = None
     self.road_types: list[str] = []
     if "road_type" in manifest:
@@ -72,6 +89,16 @@ def release(directory: Path) -> Networks | None:
     return Networks(manifest, directory) if manifest.get("format") == MANIFEST_FORMAT else None
   except (OSError, ValueError, KeyError, TypeError):
     return None
+
+
+def classifier_for_country(classifier, codes: tuple[str, ...], country: str | None):
+  """Bind the classifier's optional input to one GPS country for every crop of the frame."""
+  if not codes:
+    return classifier
+  encoding = np.zeros((1, len(codes)), dtype=np.float32)
+  code = country.strip().upper() if isinstance(country, str) else None
+  encoding[0, codes.index(code) if code in codes else 0] = 1
+  return lambda images: classifier(images=images, country=encoding)["logits"]
 
 
 class SpeedVision:
@@ -103,7 +130,10 @@ class SpeedVision:
     self.gps_country: str | None = None
     self.gps_position: tuple[float, float] | None = None  # of the last valid fix: the brain's time zone (hour_tz)
     self.memory = vision.SpeedLimitMemory(settings_country)
-    self.country = CountryResolver.from_settings(OfflineBorders.load(), files.settings.get("country_policy", {}))
+    borders = OfflineBorders.load()
+    self.country = CountryResolver.from_settings(borders, files.settings.get("country_policy", {}))
+    self.classifier_country = (CountryResolver.from_settings(borders, files.settings.get("classifier_country_policy", {}))
+                               if self.country is None and getattr(files, "classifier_countries", ()) else None)
     self.memory.garage_known = self.road_types is not None and "garage" in self.road_types.classes
     # The road-type network's: its step alone drops the old samples, so it is filled only for one (#104)
     self.motion = vision.CarMotion()
@@ -173,11 +203,14 @@ class SpeedVision:
     if self._fix_unix is not None:
       self.gps_clock = self._fix_unix, now
       self._fix_unix = None
-    self.gps_country = (self.country.update(now, fix) if self.country is not None else None) or self.gps_country
+    resolved_country = self.country.update(now, fix) if self.country is not None else None
+    self.gps_country = resolved_country or self.gps_country
     memory, distance, reader = self.memory, self.distance, self.reader
     memory.set_country(self.gps_country or self.settings_country)
 
-    signs = vision.read_signs(y, uv, self.signnet_input, self.finder, self.classifier, self.files.classes, full)
+    classifier_country = self.classifier_country.update(now, fix) if self.classifier_country is not None else resolved_country
+    classifier = classifier_for_country(self.classifier, getattr(self.files, "classifier_countries", ()), classifier_country)
+    signs = vision.read_signs(y, uv, self.signnet_input, self.finder, classifier, self.files.classes, full)
     raw = vision.raw_reading(signs)  # of all the signs: the reading square shows a sign of another road too
     seen = self.signs = signs
     if self.ruler is not None:

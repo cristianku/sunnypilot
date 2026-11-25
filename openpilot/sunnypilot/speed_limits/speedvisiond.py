@@ -102,7 +102,8 @@ def main() -> None:
     cloudlog.warning(f"speedvisiond: settings of the release {taken}")
   try:
     signnet = runner.Network(runner.compile_network(files.finder))
-    classifier = runner.Network(runner.compile_network(files.classifier))
+    classifier_path = runner.compile_network(files.classifier)
+    classifier = runner.StepNetwork(classifier_path) if getattr(files, "classifier_countries", ()) else runner.Network(classifier_path)
   except Exception:
     cloudlog.exception("speedvisiond: the networks did not compile or load")
     idle("no networks")
