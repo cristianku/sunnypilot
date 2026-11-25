@@ -488,9 +488,21 @@ struct ModelDataV2SP @0xa1680744031fdb2d {
   }
 }
 
+struct GpsLocationSP @0xcb9fd56c7057593a {
+  latitude @0 :Float64;
+  longitude @1 :Float64;
+  speed @2 :Float32;
+  bearingDeg @3 :Float32;
+  horizontalAccuracy @4 :Float32;  # m
+  bearingAccuracyDeg @5 :Float32;
+  hasFix @6 :Bool;
+  gpsOK @7 :Bool;  # a raw fix arrived in the last 2 s
+  fused @8 :Bool;  # false while passing the raw fix through
+}
+
 # The speed limit read by the speed-limits neural network from the road camera (speedvisiond): the limit it remembers
 # from the signs it read, or 0 when it is not sure, so the resolver takes the map instead (as with carStateSP).
-struct SpeedVisionSP @0xcb9fd56c7057593a {
+struct SpeedVisionSP @0xc2243c65e0340384 {
   speedLimit @0 :Float32;  # m/s, 0 when not sure
   modelName @1 :Text;
   signRead @2 :Bool;  # a sign was read and confirmed in this frame (the same limit again too): the UI pulses
@@ -560,9 +572,6 @@ struct SpeedVisionSP @0xcb9fd56c7057593a {
     valid @1;
     unavailable @2;
   }
-}
-
-struct CustomReserved11 @0xc2243c65e0340384 {
 }
 
 struct CustomReserved12 @0x9ccdc8676701b412 {

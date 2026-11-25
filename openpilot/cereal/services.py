@@ -96,7 +96,7 @@ _services: dict[str, tuple] = {
   "liveMapDataSP": (True, 1., 1),
   "speedVisionSP": (True, 5., 5),
   "modelDataV2SP": (True, 20., 10, QueueSize.BIG),
-  "liveLocationKalman": (True, 20.),
+  "gpsLocationSP": (True, 20., 20),
 
   # debug
   "uiDebug": (True, 0., 1),

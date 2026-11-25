@@ -1,3 +1,0 @@
-SConscript(['common/transformations/SConscript'])
-SConscript(['selfdrive/locationd/SConscript'])
-SConscript(['speed_limits/SConscript'])
