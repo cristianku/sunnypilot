@@ -11,10 +11,13 @@ import numpy as np
 from test_chain import execute
 
 POLICY = {'gps_max_age_s': 2, 'gps_max_accuracy_m': 20, 'border_margin_m': 100, 'confirm_s': 0.1, 'max_sample_gap_s': 1}
+FULL_WIDTH, FULL_HEIGHT = 2688, 1520
+FULL_FRAME = NS(data=bytes(FULL_WIDTH * FULL_HEIGHT * 3 // 2), width=FULL_WIDTH, height=FULL_HEIGHT,
+                stride=FULL_WIDTH, uv_offset=FULL_WIDTH * FULL_HEIGHT)
 
 
 def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=float('inf'), signs_from=0.0, reader=None,
-               brain_contract=None, sleep=lambda _: None, ruler=None, car_state=None):
+               brain_contract=None, sleep=lambda _: None, ruler=None, car_state=None, full_available=True):
   """The messages speedvisiond sends until 1.3 s: GPS in GB (with a fix until gps_fix_until), a 30 sign from signs_from;
   ruler: the applicability network's class (applicability.Applicability), None for a release without it; car_state: the
   carState given before every frame (a NS of its fields), None for none."""
@@ -29,13 +32,21 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
     height = 16
     frame_id = 0
 
-    def __init__(self, *args):
-      pass
+    def __init__(self, _name, stream, _conflate):
+      self.full = stream == 4
+      if self.full:
+        self.width, self.height = FULL_WIDTH, FULL_HEIGHT
+
+    @staticmethod
+    def available_streams(_name, _block):
+      return {0, 4} if full_available else {0}
 
     def connect(self, *args):
       return True
 
-    def recv(self):
+    def recv(self, timeout=None):
+      if self.full:
+        return FULL_FRAME
       clock.now += 0.2
       if clock.now > 1.3:
         raise Stop
@@ -78,7 +89,11 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
   signs = [dict(box=[0, 0, 10, 10], confidence=0.99, speed=30.0, **{'class': 'maximum_speed:30'})]
   v = NS(**vars(vision))
   v.SignNetInput = lambda *args: None
-  v.read_signs = lambda *args: signs if clock.now >= signs_from else []
+  def read_signs(*args):
+    assert args[-1] is not None and args[-1][0].shape == (FULL_HEIGHT, FULL_WIDTH)
+    return signs if clock.now >= signs_from else []
+
+  v.read_signs = read_signs
   b = country.OfflineBorders([{'code': 'GB', 'bbox': [0, -1, 1, 1], 'polygons': [[[[0, -1], [1, -1], [1, 1], [0, 1], [0, -1]]]]}])
   rules = NS(**{**execute(candidate / 'openpilot/sunnypilot/speed_limits/applicability.py', {'np': np}), 'Applicability': ruler})
   pipeline = NS(**execute(candidate / 'openpilot/sunnypilot/speed_limits/pipeline.py', {
@@ -91,7 +106,7 @@ def run_daemon(candidate, vision, country, settings, osm_country, gps_fix_until=
     'np': np,
     'NoReturn': object,
     'VisionIpcClient': Client,
-    'VisionStreamType': NS(VISION_STREAM_NARROW_ROAD=0),
+    'VisionStreamType': NS(VISION_STREAM_NARROW_ROAD=0, VISION_STREAM_NARROW_ROAD_FULL=4),
     'messaging': NS(sub_sock=lambda name, **kw: name, drain_sock=drain, SubMaster=Sub, PubMaster=Pub, new_message=lambda *a, **kw: NS(speedVisionSP=NS())),
     'Params': Params,
     'get_gps_location_service': lambda _: 'gpsLocationExternal',
@@ -193,6 +208,13 @@ def test_daemon_with_a_brain_publishes_what_it_says(candidate, vision, country):
   assert not hasattr(out, 'speedLimitAhead') and not hasattr(out, 'speedLimitAheadDistance')
 
 
+def test_daemon_does_not_read_signs_without_hd_but_keeps_the_brain_running(candidate, vision, country):
+  out = run_daemon(candidate, vision, country, {}, 'CH', reader=FakeBrain, brain_contract={}, full_available=False)
+  assert not out.rawSignSeen
+  assert FakeBrain.last.seen and not any(FakeBrain.last.seen)
+  assert out.speedLimit == pytest.approx(77 / 3.6)
+
+
 def test_daemon_without_a_brain_still_publishes_the_memorys_limit_ahead(candidate, vision, country):
   # vision.LimitAhead's two fields are in every message; 0 here: the first limit applies at once
   out = run_daemon(candidate, vision, country, {'country_policy': POLICY}, 'CH')
@@ -256,10 +278,11 @@ def test_daemon_goes_idle_when_the_brain_does_not_load(candidate, vision, countr
     run_daemon(candidate, vision, country, {}, 'CH', reader=refuse, brain_contract={}, sleep=sleep)
 
 
-def full_stream_functions(candidate, vision, streams, switch):
-  """speedvisiond's full_stream and full_planes with a camerad offering streams and the Developer switch at switch."""
+def full_stream_functions(candidate, vision, streams, size=(FULL_WIDTH, FULL_HEIGHT)):
+  """speedvisiond's full_stream and full_planes with a camerad offering streams of the given size."""
   class Client:
-    width, height, frame_id = 4, 4, 7
+    width, height = size
+    frame_id = 7
 
     def __init__(self, *args):
       pass
@@ -272,24 +295,25 @@ def full_stream_functions(candidate, vision, streams, switch):
       return True
 
     def recv(self, timeout):
-      return NS(data=bytes(range(24)), width=4, height=4, stride=4, uv_offset=16)
+      return FULL_FRAME
 
   env = {'os': NS(environ={}), 'Params': object, 'VisionIpcClient': Client, 'VisionStreamType': NS(VISION_STREAM_NARROW_ROAD_FULL=4),
          'cloudlog': NS(warning=lambda _: None),
          'time': NS(sleep=lambda _: None), 'np': np, 'vision': vision, 'NoReturn': object, '__name__': 'units_daemon'}
   execute(candidate / 'openpilot/sunnypilot/speed_limits/speedvisiond.py', env)
-  return env['full_stream'](NS(get_bool=lambda key: switch and key == 'ReadSignsFullResolution')), env['full_planes']
+  return env['full_stream'](), env['full_planes']
 
 
-def test_full_stream_only_with_the_switch_and_the_stream(candidate, vision):
-  assert full_stream_functions(candidate, vision, {0, 4}, False)[0] is None
-  assert full_stream_functions(candidate, vision, {0}, True)[0] is None
-  assert full_stream_functions(candidate, vision, {0, 4}, True)[0] is not None
+def test_full_stream_requires_full_resolution(candidate, vision):
+  assert full_stream_functions(candidate, vision, {0})[0] is None
+  assert full_stream_functions(candidate, vision, {0, 4}, (1344, 760))[0] is None
+  assert full_stream_functions(candidate, vision, {0, 4})[0] is not None
 
 
 def test_full_planes_of_the_same_frame_only(candidate, vision):
-  client, full_planes = full_stream_functions(candidate, vision, {0, 4}, True)
+  client, full_planes = full_stream_functions(candidate, vision, {0, 4})
   y, uv = full_planes(client, 7)
-  assert y.shape == (4, 4) and uv.shape == (2, 4)
+  assert y.shape == (FULL_HEIGHT, FULL_WIDTH) and uv.shape == (FULL_HEIGHT // 2, FULL_WIDTH)
   assert full_planes(client, 6) is None
   assert full_planes(None, 7) is None
+  assert full_planes(NS(frame_id=7, recv=lambda _: NS(width=1344, height=760)), 7) is None

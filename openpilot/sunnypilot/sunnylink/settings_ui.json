@@ -2125,17 +2125,6 @@
                   "type": "offroad_only"
                 }
               ]
-            },
-            {
-              "key": "ReadSignsFullResolution",
-              "widget": "toggle",
-              "title": "Read Signs at Full Resolution",
-              "description": "The sign classifier crops from the 2688x1520 frame. Applies from the next drive.",
-              "enablement": [
-                {
-                  "type": "offroad_only"
-                }
-              ]
             }
           ]
         }

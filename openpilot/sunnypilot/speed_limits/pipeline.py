@@ -113,17 +113,20 @@ class SpeedVision:
   road is left out of the limit and of the brain's number in force; its box still goes to a brain trained with the boxes
   of every sign read (BrainReader.add_signs). settings_country: the
   country until GPS gives one. country: None without borders or a country policy in the release's settings.
+  require_full_signs: enabled by the live daemon; a frame without matching full-resolution pixels supplies no new
+  sign readings. Offline replay can still read recordings available only in standard definition.
 
   Every time is in seconds on one clock, the one of the frames: the car's messages take the time of the frame they
   came before (car_state also the message's own, for the metres driven), as speedvisiond drains its sockets at each
   frame of the camera."""
   def __init__(self, files: Networks, width: int, height: int, focal_length: float, finder, classifier, *,
-               reader=None, road_types=None, ruler=None, settings_country: str = DEFAULT_COUNTRY):
+               reader=None, road_types=None, ruler=None, settings_country: str = DEFAULT_COUNTRY, require_full_signs: bool = False):
     self.files = files
     self.finder, self.classifier = finder, classifier
     self.reader = reader
     self.road_types = road_types if reader is None else None
     self.ruler = ruler
+    self.require_full_signs = require_full_signs
     self.signnet_input = vision.SignNetInput(width, height)
     # GPS selects only a country and sign unit. No map speed/road/junction data enters vision.
     self.settings_country = settings_country
@@ -209,8 +212,10 @@ class SpeedVision:
     memory.set_country(self.gps_country or self.settings_country)
 
     classifier_country = self.classifier_country.update(now, fix) if self.classifier_country is not None else resolved_country
-    classifier = classifier_for_country(self.classifier, getattr(self.files, "classifier_countries", ()), classifier_country)
-    signs = vision.read_signs(y, uv, self.signnet_input, self.finder, classifier, self.files.classes, full)
+    signs = []
+    if full is not None or not self.require_full_signs:
+      classifier = classifier_for_country(self.classifier, getattr(self.files, "classifier_countries", ()), classifier_country)
+      signs = vision.read_signs(y, uv, self.signnet_input, self.finder, classifier, self.files.classes, full)
     raw = vision.raw_reading(signs)  # of all the signs: the reading square shows a sign of another road too
     seen = self.signs = signs
     if self.ruler is not None:

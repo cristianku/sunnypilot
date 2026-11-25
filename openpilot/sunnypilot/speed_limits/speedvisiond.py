@@ -34,8 +34,8 @@ When the release has the applicability network (applicability.Applicability), it
 signs of the families it learnt: a sign it gives to another road (a side street, an exit, the lane beside) is not
 taken, neither by the memory, nor by the brain, nor by the distance; the reading square still shows it, with
 rawSignTaken false and rawSignRoad other_road. A release without it takes every sign, as before.
-With the Developer switch Read Signs at Full Resolution the classifier's crops come from the full stream of camerad, the
-same frame before the scaling; SignNet, the road-type network and the distance stay on the low frame.
+The classifier's crops always come from the matching 2688x1520 frame of camerad. If it is missing, skip the sign
+reading for that frame. SignNet, the brain, the road-type network and the distance stay on the low frame.
 """
 import os
 os.environ['GMMU'] = '0'
@@ -54,28 +54,30 @@ from openpilot.sunnypilot.speed_limits import applicability, brain, pipeline, ru
 from openpilot.sunnypilot.speed_limits.country import GpsFix
 
 FULL_FRAME_WAIT = 10  # ms for the full stream's frame, already sent when the low one comes
+FULL_ROAD_SIZE = (2688, 1520)
 NICENESS = 10  # the frame's preparation takes 100 ms on a little core: the driving processes come first
 
 
-def full_stream(params: Params) -> VisionIpcClient | None:
-  """The road camera before the scaling when the Developer switch asks for it and camerad has it, else None."""
-  if not params.get_bool("ReadSignsFullResolution"):
-    return None
+def full_stream() -> VisionIpcClient | None:
+  """The road camera before scaling, required for sign classification."""
   if VisionStreamType.VISION_STREAM_NARROW_ROAD_FULL not in VisionIpcClient.available_streams("camerad", False):
-    cloudlog.warning("speedvisiond: no full road stream, the signs from the low frames")
+    cloudlog.warning("speedvisiond: no full road stream, skipping sign classification")
     return None
   client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_NARROW_ROAD_FULL, True)
   while not client.connect(False):
     time.sleep(0.1)
+  if (client.width, client.height) != FULL_ROAD_SIZE:
+    cloudlog.warning(f"speedvisiond: unexpected full road stream size {client.width} x {client.height}; skipping sign classification")
+    return None
   cloudlog.warning(f"speedvisiond: the signs from the full road stream, {client.width} x {client.height}")
   return client
 
 
 def full_planes(client: VisionIpcClient | None, frame_id: int) -> tuple[np.ndarray, np.ndarray] | None:
   """The planes of the full stream's frame frame_id, None when it has no such frame right now: camerad sends it just
-  before the low one, so it is there, unless a newer one came in the meantime and the low frame serves this time."""
+  before the low one. If a newer one came in the meantime, skip sign classification for this frame."""
   buf = client.recv(FULL_FRAME_WAIT) if client is not None else None
-  if buf is None or client.frame_id != frame_id:
+  if buf is None or client.frame_id != frame_id or (buf.width, buf.height) != FULL_ROAD_SIZE:
     return None
   return vision.nv12_planes(np.frombuffer(buf.data, dtype=np.uint8), buf.width, buf.height, buf.stride, buf.uv_offset)
 
@@ -130,7 +132,7 @@ def main() -> None:
     time.sleep(0.1)
   cloudlog.warning(f"speedvisiond: {files.name} on the road camera, {client.width} x {client.height}")
 
-  full = full_stream(Params())
+  full = full_stream()
 
   reader = None
   if files.brain is not None:
@@ -166,7 +168,7 @@ def main() -> None:
   # Everything between these sockets and the message sent (pipeline.py): the same code replays a recorded drive.
   speed_vision = pipeline.SpeedVision(files, client.width, client.height, focal_length(client.width, client.height),
                                       finder, classifier, reader=reader, road_types=road_types, ruler=ruler,
-                                      settings_country=settings_country)
+                                      settings_country=settings_country, require_full_signs=True)
   if speed_vision.country is None:
     cloudlog.warning(f"speedvisiond: no country policy/borders, the country of the settings: {settings_country}")
   while True:

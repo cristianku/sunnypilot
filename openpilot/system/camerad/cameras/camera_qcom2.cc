@@ -254,9 +254,12 @@ void camerad_thread() {
   m.init();
 
   // *** per-cam init ***
-  // either Developer switch of the road at full resolution, read once like encoderd does: it applies from the next drive
+  // Match the manager's speed_vision predicate: sign reading needs the full stream even when recording does not.
+  // Read once at camera startup, like encoderd does for recording.
   Params params;
-  const bool road_full = params.getBool("RecordRoadFullResolution") || params.getBool("ReadSignsFullResolution");
+  const auto speed_limit_policy = params.get("SpeedLimitPolicy");
+  const bool read_signs = params.getBool("SpeedLimitVisionDisplay") || speed_limit_policy == "5" || speed_limit_policy == "6";
+  const bool road_full = params.getBool("RecordRoadFullResolution") || read_signs;
 
   std::vector<std::unique_ptr<CameraState>> cams;
   for (const auto &config : ALL_CAMERA_CONFIGS) {

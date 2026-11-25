@@ -142,25 +142,21 @@ stays as it is and such a brain reads a plain 80. Whether the road is wet the br
 it learns that from passing the plate on a wet road and on a dry one, with the speed of each in Speed review. No code turns a
 plate and a wet road into a limit.
 
-## Full resolution switches
+## Full-resolution sign crops and recording
 
-Two Developer switches, both off by default and applied from the next drive. With them off nothing changes.
+The on-car classifier always crops from the 2688x1520 road frame. SignNet still finds boxes in the 896x288 band from
+the 1344x760 stream. `vision.classifier_input` scales the box by two, cuts it from the full frame with the same `frame_id`
+and resizes it to 160x160. If that full frame is unavailable, no new signs are read that step. The brain still runs.
 
-- **Record Road at Full Resolution** (`RecordRoadFullResolution`): `encoderd` writes `fcamera.hevc` from the 2688x1520
-  stream, `qcamera` stays on the 1344x760 one. Same file, same index, 10 Mbit/s and a keyframe every 30 frames, so about
-  twice the disk.
-- **Read Signs at Full Resolution** (`ReadSignsFullResolution`): SignNet stays on the 1344x760 frame; the classifier's
-  crop is the same window multiplied by 2, cut in memory from the frame with the same `frame_id`
-  (`vision.classifier_input`). A frame the full stream does not have is read from the low one.
+**Record Road at Full Resolution** (`RecordRoadFullResolution`) is a separate Developer switch, off by default and applied
+at the start of the next drive. It makes `encoderd` save `fcamera.hevc` from the full stream; `qcamera` stays at 1344x760.
+The file and index are unchanged, with 10 Mbit/s and a keyframe every 30 frames. Without the full stream it records as usual.
 
-Both need `VISION_STREAM_NARROW_ROAD_FULL` from `camerad`. Without that stream `encoderd` records as usual and
-`speedvisiond` reads the low frames.
-
-`camerad` gives that stream with either switch on and a sensor that scales (OS04C10; the OX03C10 has one size and stays
-as it is). The road camera then goes through the BPS, as the cabin does, and one pass writes both sizes of a frame: the
-full one into the new stream, sent first, the low one where it always was. So the driving model reads a BPS picture too:
-another debayer, no vignetting correction, about 7 ms later. It costs about 250 MB of memory. With both switches off
-the road camera stays on the IFE.
+`camerad` enables `VISION_STREAM_NARROW_ROAD_FULL` at startup when Smartspeed or its vision display is selected, or when
+full-resolution recording is on. It needs a sensor that scales (OS04C10; OX03C10 does not supply that stream). The road
+camera then goes through the BPS, and one pass writes both sizes of a frame. The driving model also gets the BPS picture:
+another debayer, no vignetting correction, about 7 ms later, and about 250 MB of extra memory. Otherwise the road camera
+stays on the IFE.
 
 ## One loop, on the car and over a recorded drive
 
